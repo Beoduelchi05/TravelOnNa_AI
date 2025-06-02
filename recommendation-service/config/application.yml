@@ -1,0 +1,76 @@
+server:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 2
+
+service:
+  name: "recommendation-service"
+  version: "1.0.0"
+  debug: false
+
+# 데이터베이스 설정 (백엔드와 동일한 RDS)
+datasource:
+  url: "mysql+pymysql://admin:${db.password}@travelonna.chm0a4kmgsm5.ap-northeast-2.rds.amazonaws.com:3306/travelonna?charset=utf8mb4"
+  host: "travelonna.chm0a4kmgsm5.ap-northeast-2.rds.amazonaws.com"
+  port: 3306
+  database: "travelonna"
+  username: "admin"
+  password: "${db.password}"
+  charset: "utf8mb4"
+  pool:
+    size: 5
+    max_overflow: 10
+    recycle: 3600
+    pre_ping: true
+
+# ALS 모델 설정
+model:
+  path: "/app/models"
+  file_name: "als_model.pkl"
+  max_recommendations: 50
+  default_limit: 10
+  
+# 추천 알고리즘 설정
+recommendation:
+  # 협업 필터링 가중치
+  collaborative_weight: 0.7
+  # 인기도 기반 가중치  
+  popularity_weight: 0.3
+  # 신규 사용자 임계값 (상호작용 수)
+  cold_start_threshold: 5
+  # 필터링 설정
+  min_interactions: 1
+  exclude_own_items: true
+
+# 성능 및 캐싱 설정
+performance:
+  cache_ttl: 3600  # 1시간
+  batch_size: 100
+  max_concurrent_requests: 50
+  
+# Redis 캐시 설정 (선택사항)
+redis:
+  host: "redis"
+  port: 6379
+  db: 0
+  password: null
+  enabled: false
+
+# 로깅 설정
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "/app/logs/recommendation.log"
+  max_size: "10MB"
+  backup_count: 5
+
+# API 설정
+api:
+  cors:
+    allow_origins: ["*"]
+    allow_methods: ["*"] 
+    allow_headers: ["*"]
+    allow_credentials: false
+  rate_limit:
+    enabled: true
+    requests_per_minute: 100 

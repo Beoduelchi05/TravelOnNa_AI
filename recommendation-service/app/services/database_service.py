@@ -1,0 +1,448 @@
+import pandas as pd
+import pymysql
+from sqlalchemy import create_engine, text
+from sqlalchemy.pool import QueuePool
+from typing import List, Dict, Any, Optional
+from app.utils.logger import get_logger
+from app.utils.config import get_settings
+
+logger = get_logger(__name__)
+
+class DatabaseService:
+    """MySQL 데이터베이스 연동 서비스"""
+    
+    def __init__(self):
+        self.settings = get_settings()
+        self.engine = None
+        self._connect()
+    
+    def _connect(self):
+        """데이터베이스 연결 설정"""
+        try:
+            # YAML 설정에서 DB URL 가져오기
+            db_url = self.settings.db_url
+            
+            if not db_url:
+                # URL이 없으면 개별 설정으로 구성
+                db_url = (
+                    f"mysql+pymysql://{self.settings.db_user}:{self.settings.db_password}"
+                    f"@{self.settings.db_host}:{self.settings.db_port}/{self.settings.db_name}"
+                    f"?charset=utf8mb4"
+                )
+            
+            # SQLAlchemy 엔진 생성
+            pool_config = self.settings.get('datasource.pool', {})
+            self.engine = create_engine(
+                db_url,
+                poolclass=QueuePool,
+                pool_size=pool_config.get('size', 5),
+                max_overflow=pool_config.get('max_overflow', 10),
+                pool_pre_ping=pool_config.get('pre_ping', True),
+                pool_recycle=pool_config.get('recycle', 3600),
+                echo=self.settings.debug
+            )
+            
+            # 연결 테스트
+            with self.engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            
+            logger.info("✅ MySQL 데이터베이스 연결 성공")
+            logger.info(f"   - 호스트: {self.settings.db_host}")
+            logger.info(f"   - 데이터베이스: {self.settings.db_name}")
+            
+        except Exception as e:
+            logger.error(f"❌ 데이터베이스 연결 실패: {str(e)}")
+            raise
+    
+    def get_user_item_interactions(self) -> pd.DataFrame:
+        """사용자-아이템 상호작용 데이터 조회 (user_actions 테이블 기반)"""
+        query = """
+        SELECT 
+            ua.user_id,
+            ua.target_id as item_id,
+            CASE ua.action_type 
+                WHEN 'post' THEN 5.0    -- 작성자 자신의 포스트 (높은 가중치)
+                WHEN 'like' THEN 4.0    -- 좋아요 
+                WHEN 'comment' THEN 3.0 -- 댓글
+                WHEN 'view' THEN 1.0    -- 조회
+                ELSE 1.0 
+            END as rating,
+            ua.action_time as created_at,
+            ua.action_type,
+            ua.target_type
+        FROM user_actions ua
+        WHERE ua.target_type IN ('log', 'place', 'plan')
+          AND ua.action_time >= DATE_SUB(NOW(), INTERVAL 6 MONTH)  -- 최근 6개월
+        ORDER BY ua.action_time DESC
+        LIMIT 50000  -- 더 많은 데이터 로드
+        """
+        
+        try:
+            with self.engine.connect() as conn:
+                df = pd.read_sql(query, conn)
+            logger.info(f"✅ user_actions 기반 상호작용 데이터 조회 완료: {len(df)}건")
+            logger.info(f"   - 액션 타입별 분포:")
+            if len(df) > 0:
+                action_counts = df['action_type'].value_counts()
+                for action, count in action_counts.items():
+                    logger.info(f"     * {action}: {count}건")
+            return df
+        except Exception as e:
+            logger.error(f"❌ user_actions 상호작용 데이터 조회 실패: {str(e)}")
+            # 기존 방식으로 fallback
+            return self._get_legacy_user_item_interactions()
+    
+    def _get_legacy_user_item_interactions(self) -> pd.DataFrame:
+        """기존 방식의 상호작용 데이터 조회 (fallback용)"""
+        query = """
+        SELECT 
+            ua.user_id,
+            ua.log_id as item_id,
+            ua.rating,
+            ua.interaction_date as created_at
+        FROM (
+            -- 좋아요 데이터
+            SELECT 
+                lk.user_id,
+                lk.log_id,
+                5.0 as rating,
+                'like' as action_type,
+                NOW() as interaction_date
+            FROM likes lk
+            JOIN log l ON lk.log_id = l.log_id
+            WHERE l.is_public = 1
+            
+            UNION ALL
+            
+            -- 댓글 데이터  
+            SELECT 
+                lc.user_id,
+                lc.log_id,
+                3.0 as rating,
+                'comment' as action_type,
+                lc.created_at as interaction_date
+            FROM log_comment lc
+            JOIN log l ON lc.log_id = l.log_id
+            WHERE l.is_public = 1
+              AND lc.created_at IS NOT NULL
+            
+            UNION ALL
+            
+            -- 작성자 자신의 기록 (높은 가중치)
+            SELECT 
+                l.user_id,
+                l.log_id,
+                4.0 as rating,
+                'own' as action_type,
+                l.created_at as interaction_date
+            FROM log l
+            WHERE l.is_public = 1
+              AND l.created_at IS NOT NULL
+        ) ua
+        ORDER BY ua.interaction_date DESC
+        LIMIT 10000
+        """
+        
+        try:
+            with self.engine.connect() as conn:
+                df = pd.read_sql(query, conn)
+            logger.info(f"✅ 기존 방식 상호작용 데이터 조회 완료: {len(df)}건")
+            return df
+        except Exception as e:
+            logger.error(f"❌ 기존 방식 상호작용 데이터 조회 실패: {str(e)}")
+            return pd.DataFrame()
+    
+    def get_item_metadata(self, item_ids: List[int]) -> Dict[str, Dict[str, Any]]:
+        """아이템(여행 기록) 메타데이터 조회"""
+        if not item_ids:
+            return {}
+            
+        placeholders = ','.join(['%s'] * len(item_ids))
+        query = f"""
+        SELECT 
+            l.log_id,
+            l.comment as description,
+            l.created_at,
+            u.name as author_name,
+            p.nickname as author_nickname,
+            COUNT(DISTINCT lk.user_id) as like_count,
+            COUNT(DISTINCT lc.loco_id) as comment_count
+        FROM log l
+        JOIN user u ON l.user_id = u.user_id
+        LEFT JOIN profile p ON u.user_id = p.user_id
+        LEFT JOIN likes lk ON l.log_id = lk.log_id  
+        LEFT JOIN log_comment lc ON l.log_id = lc.log_id
+        WHERE l.log_id IN ({placeholders})
+          AND l.is_public = 1
+        GROUP BY l.log_id, l.comment, l.created_at, u.name, p.nickname
+        """
+        
+ㅣ        try:
+            with self.engine.connect() as conn:
+                df = pd.read_sql(query, conn, params=tuple(item_ids))
+            
+        metadata = {}
+            for _, row in df.iterrows():
+                metadata[str(row['log_id'])] = {
+                    "title": f"여행 기록 {row['log_id']}",  # 기본 제목
+                    "description": row['description'][:200] if row['description'] else "",
+                    "image_url": None,  # 실제 테이블에 없음
+                    "category": "여행",  # 기본값
+                    "location": "미지정",  # 기본값
+                    "author_name": row['author_name'],
+                    "author_nickname": row['author_nickname'],
+                    "created_at": row['created_at'].isoformat() if row['created_at'] else None,
+                    "popularity_rank": int(row['like_count']) + int(row['comment_count']),
+                "extra": {
+                        "like_count": int(row['like_count']),
+                        "comment_count": int(row['comment_count'])
+                    }
+                }
+            
+            logger.info(f"✅ 메타데이터 조회 완료: {len(metadata)}개")
+        return metadata
+            
+        except Exception as e:
+            logger.error(f"❌ 메타데이터 조회 실패: {str(e)}")
+            return {}
+    
+    def get_popular_items(self, rec_type: str, limit: int) -> List[int]:
+        """인기 아이템 조회"""
+        if rec_type == "record":
+            query = """
+            SELECT 
+                l.log_id,
+                (COUNT(DISTINCT lk.user_id) * 3 + 
+                 COUNT(DISTINCT lc.loco_id) * 2) as popularity_score
+            FROM log l
+            LEFT JOIN likes lk ON l.log_id = lk.log_id
+            LEFT JOIN log_comment lc ON l.log_id = lc.log_id
+            WHERE l.is_public = 1
+              AND l.created_at >= DATE_SUB(NOW(), INTERVAL 1 MONTH)
+            GROUP BY l.log_id
+            HAVING popularity_score > 0
+            ORDER BY popularity_score DESC, l.created_at DESC
+            LIMIT %s
+            """
+        elif rec_type == "place":
+            query = """
+            SELECT 
+                p.place_id as log_id,
+                COUNT(*) as popularity_score
+            FROM place p
+            JOIN plan pl ON p.plan_id = pl.plan_id
+            WHERE pl.is_public = 1
+              AND p.created_at >= DATE_SUB(NOW(), INTERVAL 1 MONTH)
+            GROUP BY p.place_id
+            ORDER BY popularity_score DESC
+            LIMIT %s
+            """
+        else:
+            # 기본값: 최신 공개 기록
+            query = """
+            SELECT log_id
+            FROM log
+            WHERE is_public = 1
+            ORDER BY created_at DESC
+            LIMIT %s
+            """
+        
+        try:
+            with self.engine.connect() as conn:
+                df = pd.read_sql(query, conn, params=(limit,))
+            
+            item_ids = df['log_id'].tolist()
+            logger.info(f"✅ 인기 아이템 조회 완료: {len(item_ids)}개")
+            return item_ids
+            
+        except Exception as e:
+            logger.error(f"❌ 인기 아이템 조회 실패: {str(e)}")
+            return list(range(1, limit + 1))  # 폴백
+    
+    def get_user_preferences(self, user_id: int) -> Dict[str, Any]:
+        """사용자 선호도 정보 조회"""
+        query = """
+        SELECT 
+            u.user_id,
+            p.nickname,
+            -- 선호 카테고리 (가장 많이 좋아요한 카테고리)
+            (SELECT l.category 
+             FROM like_log lk 
+             JOIN log l ON lk.log_id = l.log_id 
+             WHERE lk.user_id = u.user_id 
+             GROUP BY l.category 
+             ORDER BY COUNT(*) DESC 
+             LIMIT 1) as preferred_category,
+            -- 선호 지역
+            (SELECT l.location 
+             FROM like_log lk 
+             JOIN log l ON lk.log_id = l.log_id 
+             WHERE lk.user_id = u.user_id 
+             GROUP BY l.location 
+             ORDER BY COUNT(*) DESC 
+             LIMIT 1) as preferred_location
+        FROM user u
+        LEFT JOIN profile p ON u.user_id = p.user_id
+        WHERE u.user_id = %s
+        """
+        
+        try:
+            with self.engine.connect() as conn:
+                df = pd.read_sql(query, conn, params=[user_id])
+            
+            if len(df) > 0:
+                row = df.iloc[0]
+                return {
+                    "user_id": int(row['user_id']),
+                    "nickname": row['nickname'],
+                    "preferred_category": row['preferred_category'],
+                    "preferred_location": row['preferred_location']
+                }
+            else:
+                return {"user_id": user_id}
+                
+        except Exception as e:
+            logger.error(f"❌ 사용자 선호도 조회 실패: {str(e)}")
+            return {"user_id": user_id}
+    
+    def close(self):
+        """데이터베이스 연결 종료"""
+        if self.engine:
+            self.engine.dispose()
+            logger.info("데이터베이스 연결 종료")
+    
+    def save_recommendations_batch(self, recommendations: List[Dict[str, Any]], batch_id: int) -> bool:
+        """추천 결과를 recommendations 테이블에 배치 저장"""
+        if not recommendations:
+            return True
+            
+        try:
+            # 기존 추천 결과 삭제 (사용자별)
+            user_ids = list(set([rec['user_id'] for rec in recommendations]))
+            placeholders = ','.join(['%s'] * len(user_ids))
+            
+            delete_query = f"""
+            DELETE FROM recommendations 
+            WHERE user_id IN ({placeholders})
+            """
+            
+            # 새로운 추천 결과 삽입 (현재 스키마에 맞게)
+            insert_query = """
+            INSERT INTO recommendations 
+            (user_id, item_id, item_type, score, created_at)
+            VALUES (%s, %s, %s, %s, NOW())
+            """
+            
+            with self.engine.begin() as conn:
+                # 기존 데이터 삭제
+                conn.execute(text(delete_query), tuple(user_ids))
+                
+                # 새 데이터 삽입
+                insert_data = []
+                for rec in recommendations:
+                    insert_data.append((
+                        rec['user_id'],
+                        rec['item_id'], 
+                        rec['item_type'],
+                        rec['score']
+                    ))
+                
+                conn.execute(text(insert_query), insert_data)
+            
+            logger.info(f"✅ 추천 결과 배치 저장 완료: {len(recommendations)}건")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ 추천 결과 배치 저장 실패: {str(e)}")
+            return False
+    
+    def create_batch_log(self, batch_type: str, total_users: int) -> Optional[int]:
+        """배치 처리 로그 생성"""
+        try:
+            query = """
+            INSERT INTO recommendation_batch_logs 
+            (batch_type, total_users, processed_users, total_recommendations, 
+             start_time, status)
+            VALUES (%s, %s, 0, 0, NOW(), 'running')
+            """
+            
+            with self.engine.begin() as conn:
+                result = conn.execute(text(query), (batch_type, total_users))
+                batch_id = result.lastrowid
+            
+            logger.info(f"✅ 배치 로그 생성: batch_id={batch_id}, type={batch_type}")
+            return batch_id
+            
+        except Exception as e:
+            logger.error(f"❌ 배치 로그 생성 실패: {str(e)}")
+            return None
+    
+    def update_batch_log(self, batch_id: int, processed_users: int, 
+                        total_recommendations: int, status: str, 
+                        error_message: Optional[str] = None) -> bool:
+        """배치 처리 로그 업데이트"""
+        try:
+            query = """
+            UPDATE recommendation_batch_logs 
+            SET processed_users = %s,
+                total_recommendations = %s,
+                status = %s,
+                error_message = %s,
+                end_time = CASE WHEN %s IN ('completed', 'failed') THEN NOW() ELSE end_time END
+            WHERE batch_id = %s
+            """
+            
+            with self.engine.begin() as conn:
+                conn.execute(text(query), (
+                    processed_users, total_recommendations, 
+                    status, error_message, status, batch_id
+                ))
+            
+            logger.info(f"✅ 배치 로그 업데이트: batch_id={batch_id}, status={status}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ 배치 로그 업데이트 실패: {str(e)}")
+            return False
+    
+    def get_users_for_batch_processing(self, batch_type: str = "full") -> List[int]:
+        """배치 처리 대상 사용자 조회"""
+        if batch_type == "incremental":
+            # 최근 활동한 사용자만
+            query = """
+            SELECT DISTINCT user_id 
+            FROM user_actions 
+            WHERE action_time >= DATE_SUB(NOW(), INTERVAL 6 HOUR)
+            UNION
+            SELECT DISTINCT user_id 
+            FROM recommendations 
+            WHERE created_at < DATE_SUB(NOW(), INTERVAL 6 HOUR)
+            ORDER BY user_id
+            LIMIT 1000
+            """
+        else:
+            # 전체 사용자
+            query = """
+            SELECT user_id 
+            FROM user 
+            WHERE user_id IN (
+                SELECT DISTINCT user_id FROM user_actions
+                UNION 
+                SELECT DISTINCT user_id FROM likes
+                UNION
+                SELECT DISTINCT user_id FROM log_comment
+            )
+            ORDER BY user_id
+            """
+        
+        try:
+            with self.engine.connect() as conn:
+                df = pd.read_sql(query, conn)
+            
+            user_ids = df['user_id'].tolist()
+            logger.info(f"✅ 배치 처리 대상 사용자 조회: {len(user_ids)}명 ({batch_type})")
+            return user_ids
+            
+        except Exception as e:
+            logger.error(f"❌ 배치 처리 대상 사용자 조회 실패: {str(e)}")
+            return []

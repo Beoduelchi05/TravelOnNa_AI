@@ -1,0 +1,199 @@
+pipeline {
+    agent any
+    
+    environment {
+        // Docker 이미지 관련
+        DOCKER_IMAGE = 'travelonna-ai-recommendation'
+        DOCKER_TAG = "${BUILD_NUMBER}"
+        DOCKER_REGISTRY = 'your-registry'  // 실제 레지스트리로 변경
+        
+        // Kubernetes 관련
+        K8S_NAMESPACE = 'default'
+        K8S_DEPLOYMENT = 'travelonna-ai-recommendation'
+        
+        // Git 관련
+        GIT_BRANCH = 'main'
+        
+        // BuildKit 활성화
+        DOCKER_BUILDKIT = '1'
+    }
+    
+    stages {
+        stage('🏗️ Checkout') {
+            steps {
+                echo '📥 코드 체크아웃 중...'
+                checkout scm
+                
+                script {
+                    env.GIT_COMMIT_SHORT = sh(
+                        script: "git rev-parse --short HEAD",
+                        returnStdout: true
+                    ).trim()
+                }
+            }
+        }
+        
+        stage('🛠️ Setup Docker Buildx') {
+            steps {
+                echo '🛠️ Docker Buildx 설정 중...'
+                sh '''
+                    # Docker Buildx 버전 확인
+                    docker buildx version
+                    
+                    # Builder 인스턴스 생성 (없을 경우)
+                    docker buildx create --name travelonna-builder --use --bootstrap || true
+                    
+                    # 현재 builder 확인
+                    docker buildx ls
+                    
+                    # BuildKit 기능 확인
+                    docker buildx inspect --bootstrap
+                '''
+            }
+        }
+        
+        stage('🧪 Test') {
+            steps {
+                echo '🧪 Python 테스트 실행 중...'
+                sh '''
+                    cd TravelOnNa_AI/recommendation-service
+                    
+                    # Python 환경 확인
+                    python3 --version
+                    pip3 --version
+                    
+                    # 의존성 설치
+                    pip3 install -r requirements.txt
+                    
+                    # 문법 체크
+                    python3 -m py_compile app/main.py
+                    python3 -m py_compile app/services/*.py
+                    python3 -m py_compile app/api/*.py
+                    
+                    echo "✅ 모든 테스트 통과!"
+                '''
+            }
+        }
+        
+        stage('🐳 Docker Buildx Build') {
+            steps {
+                echo '🐳 Docker Buildx 이미지 빌드 중...'
+                script {
+                    dir('TravelOnNa_AI/recommendation-service') {
+                        // Multi-platform 빌드 (linux/amd64, linux/arm64)
+                        sh """
+                            docker buildx build \
+                                --platform linux/amd64,linux/arm64 \
+                                --tag ${DOCKER_IMAGE}:${DOCKER_TAG} \
+                                --tag ${DOCKER_IMAGE}:latest \
+                                --tag ${DOCKER_IMAGE}:${GIT_COMMIT_SHORT} \
+                                --build-arg BUILD_DATE=\$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+                                --build-arg VCS_REF=${GIT_COMMIT_SHORT} \
+                                --build-arg BUILD_NUMBER=${BUILD_NUMBER} \
+                                --cache-from type=local,src=/tmp/.buildx-cache \
+                                --cache-to type=local,dest=/tmp/.buildx-cache-new,mode=max \
+                                --load \
+                                .
+                        """
+                        
+                        // 캐시 교체 (오래된 캐시 정리)
+                        sh '''
+                            rm -rf /tmp/.buildx-cache
+                            mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
+                        '''
+                        
+                        echo "✅ Docker Buildx 빌드 완료: ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                    }
+                }
+            }
+        }
+        
+        stage('🔍 Image Security Scan') {
+            steps {
+                echo '🔍 이미지 보안 스캔 실행 중...'
+                sh '''
+                    # 이미지 취약점 스캔 (선택사항)
+                    # docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+                    #   -v $(pwd):/app aquasec/trivy:latest image ${DOCKER_IMAGE}:${DOCKER_TAG}
+                    
+                    # 이미지 정보 확인
+                    docker images ${DOCKER_IMAGE}:${DOCKER_TAG}
+                    docker inspect ${DOCKER_IMAGE}:${DOCKER_TAG} | head -20
+                '''
+            }
+        }
+        
+        stage('🚀 Deploy to K8s') {
+            steps {
+                echo '🚀 Kubernetes 배포 중...'
+                sh '''
+                    cd TravelOnNa_AI/recommendation-service
+                    
+                    # ConfigMap과 Secret 적용 (처음 한 번만)
+                    kubectl apply -f k8s/configmap.yaml || true
+                    
+                    # 배포 매니페스트에서 이미지 태그 업데이트
+                    sed -i "s|image: travelonna-ai-recommendation:latest|image: travelonna-ai-recommendation:${DOCKER_TAG}|g" k8s/deployment.yaml
+                    
+                    # Kubernetes 배포
+                    kubectl apply -f k8s/deployment.yaml
+                    
+                    # 배포 상태 확인
+                    kubectl rollout status deployment/${K8S_DEPLOYMENT} -n ${K8S_NAMESPACE} --timeout=300s
+                    
+                    # 서비스 확인
+                    kubectl get pods -l app=${K8S_DEPLOYMENT} -n ${K8S_NAMESPACE}
+                    kubectl get svc -l app=${K8S_DEPLOYMENT} -n ${K8S_NAMESPACE}
+                '''
+            }
+        }
+        
+        stage('🩺 Health Check') {
+            steps {
+                echo '🩺 헬스체크 실행 중...'
+                sh '''
+                    # 서비스 IP 가져오기
+                    SERVICE_IP=$(kubectl get svc travelonna-ai-recommendation-service -o jsonpath='{.spec.clusterIP}')
+                    
+                    # 헬스체크 (최대 5분 대기)
+                    for i in {1..30}; do
+                        if curl -f http://${SERVICE_IP}:8000/health; then
+                            echo "✅ 헬스체크 성공!"
+                            break
+                        else
+                            echo "⏳ 헬스체크 대기 중... ($i/30)"
+                            sleep 10
+                        fi
+                    done
+                '''
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo '🎉 배포 성공!'
+            // 성공시 알림 (Slack, 이메일 등)
+        }
+        failure {
+            echo '❌ 배포 실패!'
+            // 실패시 롤백 및 알림
+            sh '''
+                echo "🔄 이전 버전으로 롤백 중..."
+                kubectl rollout undo deployment/${K8S_DEPLOYMENT} -n ${K8S_NAMESPACE} || true
+            '''
+        }
+        always {
+            // 정리 작업
+            sh '''
+                # Docker 이미지 정리
+                docker image prune -f || true
+                
+                # Buildx 캐시 정리 (주간 1회)
+                if [ "$(date +%u)" = "1" ]; then
+                    docker buildx prune -f || true
+                fi
+            '''
+        }
+    }
+} 

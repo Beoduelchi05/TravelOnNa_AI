@@ -171,3 +171,8 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# 데이터
+Data/
+Data_Preprocessing/
+Guide/
