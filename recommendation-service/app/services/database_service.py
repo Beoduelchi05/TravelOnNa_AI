@@ -177,11 +177,11 @@ class DatabaseService:
         GROUP BY l.log_id, l.comment, l.created_at, u.name, p.nickname
         """
         
-ㅣ        try:
+        try:
             with self.engine.connect() as conn:
                 df = pd.read_sql(query, conn, params=tuple(item_ids))
             
-        metadata = {}
+            metadata = {}
             for _, row in df.iterrows():
                 metadata[str(row['log_id'])] = {
                     "title": f"여행 기록 {row['log_id']}",  # 기본 제목
@@ -193,14 +193,14 @@ class DatabaseService:
                     "author_nickname": row['author_nickname'],
                     "created_at": row['created_at'].isoformat() if row['created_at'] else None,
                     "popularity_rank": int(row['like_count']) + int(row['comment_count']),
-                "extra": {
+                    "extra": {
                         "like_count": int(row['like_count']),
                         "comment_count": int(row['comment_count'])
                     }
                 }
             
             logger.info(f"✅ 메타데이터 조회 완료: {len(metadata)}개")
-        return metadata
+            return metadata
             
         except Exception as e:
             logger.error(f"❌ 메타데이터 조회 실패: {str(e)}")
