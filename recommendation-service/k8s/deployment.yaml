@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: travelonna-ai-recommendation
+  namespace: default
+  labels:
+    app: travelonna-ai-recommendation
+    version: v1
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: travelonna-ai-recommendation
+  template:
+    metadata:
+      labels:
+        app: travelonna-ai-recommendation
+        version: v1
+    spec:
+      containers:
+      - name: recommendation-service
+        image: travelonna-ai-recommendation:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        # 데이터베이스 설정 (ConfigMap/Secret에서 가져오기)
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: db.host
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: db.port
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: db.name
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: db-secret
+              key: username
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-secret
+              key: password
+        # 애플리케이션 설정
+        - name: HOST
+          value: "0.0.0.0"
+        - name: PORT
+          value: "8000"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: RELOAD
+          value: "false"
+        # 헬스체크 설정
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        # 리소스 제한
+        resources:
+          limits:
+            cpu: "1000m"
+            memory: "2Gi"
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+        # 볼륨 마운트 (모델 파일 등)
+        volumeMounts:
+        - name: models-volume
+          mountPath: /app/models
+      volumes:
+      - name: models-volume
+        emptyDir: {}
+      # 노드 선택 (필요시)
+      nodeSelector:
+        kubernetes.io/os: linux
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: travelonna-ai-recommendation-service
+  namespace: default
+  labels:
+    app: travelonna-ai-recommendation
+spec:
+  selector:
+    app: travelonna-ai-recommendation
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 8000
+    protocol: TCP
+  type: ClusterIP 

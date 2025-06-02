@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  recommendation-service:
+    build: .
+    container_name: travelonna-recommendation
+    ports:
+      - "8001:8000"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker  # 백엔드와 동일한 프로필 방식
+      - CONFIG_DIR=/app/config
+    volumes:
+      - ./config:/app/config:ro        # 설정 파일 마운트
+      - ./models:/app/models:ro        # 학습된 모델 파일 마운트
+      - ./logs:/app/logs               # 로그 디렉토리
+    networks:
+      - travelonna-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      - redis  # 캐싱용 (선택사항)
+
+  # Redis 캐시 (선택사항 - 성능 향상용)
+  redis:
+    image: redis:7-alpine
+    container_name: travelonna-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - travelonna-network
+    restart: unless-stopped
+
+networks:
+  travelonna-network:
+    driver: bridge
+    external: true  # 백엔드와 동일한 네트워크 사용
+
+volumes:
+  redis_data:
