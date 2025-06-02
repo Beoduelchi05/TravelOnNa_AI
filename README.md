@@ -104,7 +104,6 @@ TravelOnNa_AI/
 │   │   └── utils/                    # 유틸리티
 │   ├── config/                       # 설정 파일
 │   ├── models/                       # 학습된 ML 모델
-│   ├── k8s/                         # Kubernetes 매니페스트
 │   ├── Dockerfile                    # Docker 빌드 파일
 │   ├── docker-compose.yml           # 로컬 개발 환경
 │   ├── requirements.txt             # Python 의존성
@@ -182,26 +181,16 @@ curl -X POST "http://localhost:8001/recommendations" \
 
 ## 🔄 배포
 
-### Jenkins CI/CD 파이프라인
-
-1. **빌드**: Python 문법 검사 및 의존성 체크
-2. **Docker 빌드**: Multi-arch 이미지 생성 (amd64/arm64)
-3. **푸시**: Docker Registry에 이미지 업로드  
-4. **배포**: Ansible을 통한 Kubernetes 배포
-5. **검증**: 헬스체크 및 서비스 확인
-
 ### Kubernetes 배포
 
 ```bash
-# ConfigMap 적용
-kubectl apply -f k8s/configmap.yaml
-
-# 서비스 배포
-kubectl apply -f k8s/deployment.yaml
-kubectl apply -f k8s/service.yaml
+# Ansible playbook으로 배포 (Jenkins에서 자동 실행)
+ansible-playbook -i /etc/ansible/hosts /opt/ansible/docker_build_ai.yml
+ansible-playbook -i /etc/ansible/hosts /opt/ansible/k8s_deploy_ai.yml
 
 # 배포 상태 확인
 kubectl rollout status deployment/travelonna-ai-recommendation-deploy
+kubectl get pods -l app=travelonna-ai-recommendation
 ```
 
 ## 📊 모니터링
