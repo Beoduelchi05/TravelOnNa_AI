@@ -34,12 +34,13 @@ TravelOnNa AI 추천시스템은 **협업 필터링(ALS Algorithm)**을 기반�
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Frontend      │    │   Backend       │    │   AI Service    │
-│   (React)       │ -> │   (Spring)      │ -> │   (FastAPI)     │
+│  Android App    │    │   Backend       │    │   AI Service    │
+│   (Kotlin)      │ -> │  (Spring Boot)  │ -> │   (FastAPI)     │
+│ Android Studio  │    │                 │    │                 │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
                                                        │
-                       ┌─────────────────┐            │
-                       │     MySQL       │ <----------┘
+                       ┌─────────────────┐             │
+                       │     MySQL       │ <-----------┘
                        │   (User Data)   │
                        └─────────────────┘
                                 │
@@ -48,6 +49,25 @@ TravelOnNa AI 추천시스템은 **협업 필터링(ALS Algorithm)**을 기반�
                        │   (Caching)     │
                        └─────────────────┘
 ```
+
+### 아키텍처 구성요소
+
+#### 🤖 Android Frontend
+- **Kotlin**: 안드로이드 네이티브 앱 개발
+- **Android Studio**: 통합 개발 환경 (IDE)
+- **Material Design**: 구글 디자인 가이드라인 준수
+- **REST API**: Spring Boot 백엔드와 HTTP 통신
+
+#### ⚙️ Spring Boot Backend  
+- **Spring Framework**: 메인 비즈니스 로직 처리
+- **Spring Security**: 인증 및 권한 관리
+- **JPA/Hibernate**: 데이터베이스 ORM
+- **MySQL 연동**: 사용자 및 여행 데이터 관리
+
+#### 🧠 AI Recommendation Service
+- **FastAPI**: 고성능 추천 API 서비스
+- **ALS 알고리즘**: 협업 필터링 기반 개인화 추천
+- **Redis**: 추천 결과 캐싱으로 응답 속도 최적화
 
 ## ✨ 주요 기능
 
@@ -67,6 +87,13 @@ TravelOnNa AI 추천시스템은 **협업 필터링(ALS Algorithm)**을 기반�
 - **자동화 스케줄링**: cron 기반 배치 작업 실행
 
 ## 🔧 기술 스택
+
+### Mobile Frontend
+- **Kotlin**: 안드로이드 네이티브 앱 개발 언어
+- **Android Studio**: 공식 통합 개발 환경
+- **Material Design**: UI/UX 디자인 시스템
+- **Retrofit**: HTTP 클라이언트 라이브러리
+- **Gson**: JSON 파싱 라이브러리
 
 ### Backend Framework
 - **FastAPI 0.104.1**: 고성능 비동기 웹 프레임워크
@@ -109,7 +136,6 @@ TravelOnNa_AI/
 │   ├── requirements.txt             # Python 의존성
 │   ├── run.py                       # 서비스 실행 스크립트
 │   └── batch_runner.py              # 배치 처리 스크립트
-└── Guide/                           # 개발 가이드 문서
 ```
 
 ## 🚀 빠른 시작
@@ -225,10 +251,10 @@ docker logs travelonna-recommendation
 ## 👥 팀 정보
 
 **TravelOnNa Development Team**
-- AI/ML: 추천 알고리즘 개발 및 최적화
-- Backend: Spring Boot 기반 메인 서비스
-- Frontend: React 기반 사용자 인터페이스
-- DevOps: Jenkins/Ansible/Kubernetes 기반 배포 자동화
+- **AI/ML**: 추천 알고리즘 개발 및 최적화
+- **Backend**: Spring Boot 기반 메인 서비스 개발
+- **Android**: Kotlin 기반 네이티브 모바일 앱 개발
+- **DevOps**: Jenkins/Ansible/Kubernetes 기반 배포 자동화
 
 ---
 > 🌟 **여행ON나**와 함께 더 나은 여행 경험을 만들어보세요! 
