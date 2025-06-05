@@ -222,56 +222,91 @@ class ALSRecommendationService:
         
         logger.info(f"인기도 기반 추천 생성 (타입: {rec_type})")
         
-        # DB에서 실제 인기 아이템을 가져오거나
-        # user-item matrix에서 상호작용이 많은 아이템 순으로 정렬
-        if self.user_item_matrix is not None:
+        # 먼저 DB에서 실제 인기 아이템 조회
+        try:
+            popular_items = self.db_service.get_popular_items(rec_type.value, limit * 3)
+            logger.info(f"DB에서 조회한 인기 아이템: {popular_items}")
+        except Exception as e:
+            logger.error(f"DB 인기 아이템 조회 실패: {str(e)}")
+            popular_items = []
+        
+        recommendations = []
+        
+        # DB 기반 인기 아이템이 있는 경우
+        if popular_items:
+            count = 0
+            for item_id in popular_items:
+                if count >= limit:
+                    break
+                    
+                if item_id in exclude_items:
+                    continue
+                    
+                metadata = self.item_metadata.get(str(item_id), {})
+                
+                # 순위 기반 점수 계산 (첫 번째가 가장 높음)
+                normalized_score = max(0.1, 1.0 - (count * 0.1))
+                
+                recommendation = RecommendationItem(
+                    item_id=int(item_id),
+                    score=normalized_score,
+                    item_type=rec_type,
+                    title=metadata.get("title", f"여행 기록 {item_id}"),
+                    description=metadata.get("description", ""),
+                    image_url=metadata.get("image_url"),
+                    metadata={
+                        "method": "popularity_based_db",
+                        "popularity_rank": count + 1,
+                        "author_name": metadata.get("author_name"),
+                        "author_nickname": metadata.get("author_nickname"),
+                        **metadata.get("extra", {})
+                    }
+                )
+                recommendations.append(recommendation)
+                count += 1
+                logger.info(f"인기 추천 추가: item_id={item_id}, score={normalized_score}")
+        
+        # Matrix 기반 백업 (DB 결과가 부족한 경우)
+        elif self.user_item_matrix is not None and len(recommendations) < limit:
+            logger.info("Matrix 기반 인기도 계산으로 백업")
             # 각 아이템별 상호작용 수 계산
             item_popularity = np.array(self.user_item_matrix.sum(axis=0)).flatten()
             popular_indices = np.argsort(item_popularity)[::-1]
-        else:
-            # fallback: DB에서 인기 아이템 조회
-            popular_items = self.db_service.get_popular_items(rec_type, limit * 2)
-            popular_indices = [self.item_id_map[item_id] for item_id in popular_items 
-                             if item_id in self.item_id_map]
-        
-        recommendations = []
-        count = 0
-        for item_idx in popular_indices:
-            if count >= limit:
-                break
-                
-            item_id = self.reverse_item_map.get(item_idx)
-            if not item_id or item_id in exclude_items:
-                continue
-                
-            metadata = self.item_metadata.get(str(item_id), {})
             
-            # 인기도 점수 계산
-            if self.user_item_matrix is not None:
+            count = len(recommendations)
+            for item_idx in popular_indices:
+                if count >= limit:
+                    break
+                    
+                item_id = self.reverse_item_map.get(item_idx)
+                if not item_id or item_id in exclude_items:
+                    continue
+                    
+                metadata = self.item_metadata.get(str(item_id), {})
+                
+                # 인기도 점수 계산
                 popularity_score = item_popularity[item_idx]
-                # 정규화 (최대값 기준)
                 max_popularity = item_popularity.max()
                 normalized_score = float(popularity_score / max_popularity) if max_popularity > 0 else 0.1
-            else:
-                normalized_score = max(0.1, 1.0 - (count * 0.05))
-            
-            recommendation = RecommendationItem(
-                item_id=int(item_id),
-                score=normalized_score,
-                item_type=rec_type,
-                title=metadata.get("title"),
-                description=metadata.get("description"), 
-                image_url=metadata.get("image_url"),
-                metadata={
-                    "method": "popularity_based",
-                    "popularity_rank": count + 1,
-                    "interaction_count": int(item_popularity[item_idx]) if self.user_item_matrix is not None else 0,
-                    **metadata.get("extra", {})
-                }
-            )
-            recommendations.append(recommendation)
-            count += 1
+                
+                recommendation = RecommendationItem(
+                    item_id=int(item_id),
+                    score=normalized_score,
+                    item_type=rec_type,
+                    title=metadata.get("title", f"여행 기록 {item_id}"),
+                    description=metadata.get("description", ""),
+                    image_url=metadata.get("image_url"),
+                    metadata={
+                        "method": "popularity_based_matrix",
+                        "popularity_rank": count + 1,
+                        "interaction_count": int(popularity_score),
+                        **metadata.get("extra", {})
+                    }
+                )
+                recommendations.append(recommendation)
+                count += 1
         
+        logger.info(f"인기도 기반 추천 완료: {len(recommendations)}개")
         return recommendations, "popularity_based"
     
     def _apply_filters(
