@@ -46,6 +46,9 @@ COPY --from=deps /usr/local/bin /usr/local/bin
 # 애플리케이션 코드 복사
 COPY . .
 
+# 시작 스크립트 실행 권한 부여
+RUN chmod +x start.sh
+
 # 플랫폼 정보 출력 (디버깅용)
 RUN echo "Building for platform: $TARGETPLATFORM, architecture: $TARGETARCH"
 
@@ -66,5 +69,5 @@ ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# 애플리케이션 실행
-CMD ["python", "run.py"]
+# 애플리케이션 실행 (API 서버 + 배치 스케줄러)
+CMD ["./start.sh"]

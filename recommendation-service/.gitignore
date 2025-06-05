@@ -11,10 +11,6 @@ config/application-prod.yml
 logs/
 *.log
 
-# 모델 파일 (용량이 클 수 있음)
-models/*.pkl
-models/*.joblib
-
 # Python
 __pycache__/
 *.py[cod]
