@@ -46,6 +46,10 @@ COPY --from=deps /usr/local/bin /usr/local/bin
 # 애플리케이션 코드 복사
 COPY . .
 
+# 모델 디렉토리 생성 및 모델 파일 복사
+RUN mkdir -p /app/models
+COPY models/ /app/models/
+
 # 시작 스크립트 실행 권한 부여
 RUN chmod +x start.sh
 

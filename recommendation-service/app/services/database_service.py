@@ -207,21 +207,19 @@ class DatabaseService:
             return {}
     
     def get_popular_items(self, rec_type: str, limit: int) -> List[int]:
-        """인기 아이템 조회"""
+        """인기 아이템 조회 (user_actions 기반으로 수정)"""
         if rec_type == "record":
+            # 먼저 user_actions 기반으로 인기도 계산 시도
             query = """
             SELECT 
-                l.log_id,
-                (COUNT(DISTINCT lk.user_id) * 3 + 
-                 COUNT(DISTINCT lc.loco_id) * 2) as popularity_score
-            FROM log l
-            LEFT JOIN likes lk ON l.log_id = lk.log_id
-            LEFT JOIN log_comment lc ON l.log_id = lc.log_id
-            WHERE l.is_public = 1
-              AND l.created_at >= DATE_SUB(NOW(), INTERVAL 1 MONTH)
-            GROUP BY l.log_id
-            HAVING popularity_score > 0
-            ORDER BY popularity_score DESC, l.created_at DESC
+                ua.target_id as log_id,
+                COUNT(*) as popularity_score
+            FROM user_actions ua
+            WHERE ua.target_type = 'log'
+              AND ua.action_type IN ('like', 'comment', 'view', 'post')
+              AND ua.action_time >= DATE_SUB(NOW(), INTERVAL 3 MONTH)
+            GROUP BY ua.target_id
+            ORDER BY popularity_score DESC, ua.action_time DESC
             LIMIT %s
             """
         elif rec_type == "place":
@@ -252,12 +250,27 @@ class DatabaseService:
                 df = pd.read_sql(query, conn, params=(limit,))
             
             item_ids = df['log_id'].tolist()
+            
+            # user_actions 기반 결과가 비어있으면 최신 공개 로그로 fallback
+            if not item_ids and rec_type == "record":
+                logger.warning("⚠️ user_actions 기반 인기 아이템 없음, 최신 공개 로그로 fallback")
+                fallback_query = """
+                SELECT log_id
+                FROM log
+                WHERE is_public = 1
+                ORDER BY created_at DESC
+                LIMIT %s
+                """
+                df = pd.read_sql(fallback_query, conn, params=(limit,))
+                item_ids = df['log_id'].tolist()
+            
             logger.info(f"✅ 인기 아이템 조회 완료: {len(item_ids)}개")
             return item_ids
             
         except Exception as e:
             logger.error(f"❌ 인기 아이템 조회 실패: {str(e)}")
-            return list(range(1, limit + 1))  # 폴백
+            # 최종 폴백: 순차적 ID 반환
+            return list(range(1, limit + 1))
     
     def get_user_preferences(self, user_id: int) -> Dict[str, Any]:
         """사용자 선호도 정보 조회"""
