@@ -36,7 +36,7 @@ BATCH_PID=$!
 # FastAPI 서버 시작
 echo "🌐 FastAPI 서버 시작 (포트: 8000)..."
 cd /app
-uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1 &
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 &
 SERVER_PID=$!
 
 # 시그널 핸들러
