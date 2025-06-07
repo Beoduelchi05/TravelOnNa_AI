@@ -63,6 +63,7 @@ class BatchRunner:
     def run_scheduler(self):
         """스케줄러 모드 실행"""
         logger.info("🕐 스케줄러 모드 시작")
+        logger.info("   - 초기 전체 배치: 즉시 실행")
         logger.info("   - 전체 배치: 매일 새벽 2시")
         logger.info("   - 증분 배치: 6시간마다")
         logger.info("   - 종료: Ctrl+C")
@@ -72,6 +73,14 @@ class BatchRunner:
         signal.signal(signal.SIGTERM, self.signal_handler)
         
         try:
+            # 시작 시 즉시 전체 배치 실행
+            logger.info("🚀 시작 시 초기 전체 배치 실행...")
+            initial_success = asyncio.run(self.batch_service.run_full_batch())
+            if initial_success:
+                logger.info("✅ 초기 전체 배치 완료")
+            else:
+                logger.warning("⚠️ 초기 전체 배치 실패 - 스케줄러는 계속 실행")
+            
             # 스케줄러 시작 (블로킹)
             self.batch_service.start_scheduler()
         except KeyboardInterrupt:

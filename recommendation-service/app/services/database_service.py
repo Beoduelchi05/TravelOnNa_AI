@@ -73,6 +73,16 @@ class DatabaseService:
         FROM user_actions ua
         WHERE ua.target_type IN ('log', 'place', 'plan')
           AND ua.action_time >= DATE_SUB(NOW(), INTERVAL 6 MONTH)  -- 최근 6개월
+          AND (
+              -- log 타입인 경우 공개 여부 확인
+              (ua.target_type = 'log' AND EXISTS (
+                  SELECT 1 FROM log l 
+                  WHERE l.log_id = ua.target_id AND l.is_public = 1
+              ))
+              OR 
+              -- place/plan 타입인 경우는 별도 체크 (현재는 모두 포함)
+              ua.target_type IN ('place', 'plan')
+          )
         ORDER BY ua.action_time DESC
         LIMIT 50000  -- 더 많은 데이터 로드
         """
@@ -80,12 +90,18 @@ class DatabaseService:
         try:
             with self.engine.connect() as conn:
                 df = pd.read_sql(query, conn)
-            logger.info(f"✅ user_actions 기반 상호작용 데이터 조회 완료: {len(df)}건")
+            logger.info(f"✅ user_actions 기반 상호작용 데이터 조회 완료: {len(df)}건 (공개 로그만)")
             logger.info(f"   - 액션 타입별 분포:")
             if len(df) > 0:
                 action_counts = df['action_type'].value_counts()
                 for action, count in action_counts.items():
                     logger.info(f"     * {action}: {count}건")
+                
+                # 타겟 타입별 분포도 확인
+                target_counts = df['target_type'].value_counts()
+                logger.info(f"   - 타겟 타입별 분포:")
+                for target, count in target_counts.items():
+                    logger.info(f"     * {target}: {count}건")
             return df
         except Exception as e:
             logger.error(f"❌ user_actions 상호작용 데이터 조회 실패: {str(e)}")
@@ -209,15 +225,17 @@ class DatabaseService:
     def get_popular_items(self, rec_type: str, limit: int) -> List[int]:
         """인기 아이템 조회 (user_actions 기반으로 수정)"""
         if rec_type == "record":
-            # 먼저 user_actions 기반으로 인기도 계산 시도
+            # 먼저 user_actions 기반으로 인기도 계산 시도 (공개 로그만)
             query = """
             SELECT 
                 ua.target_id as log_id,
                 COUNT(*) as popularity_score
             FROM user_actions ua
+            JOIN log l ON ua.target_id = l.log_id
             WHERE ua.target_type = 'log'
               AND ua.action_type IN ('like', 'comment', 'view', 'post')
               AND ua.action_time >= DATE_SUB(NOW(), INTERVAL 3 MONTH)
+              AND l.is_public = 1  -- 공개 로그만
             GROUP BY ua.target_id
             ORDER BY popularity_score DESC, ua.action_time DESC
             LIMIT %s
@@ -264,7 +282,7 @@ class DatabaseService:
                 df = pd.read_sql(fallback_query, conn, params=(limit,))
                 item_ids = df['log_id'].tolist()
             
-            logger.info(f"✅ 인기 아이템 조회 완료: {len(item_ids)}개")
+            logger.info(f"✅ 인기 아이템 조회 완료: {len(item_ids)}개 (공개만)")
             return item_ids
             
         except Exception as e:
@@ -380,8 +398,9 @@ class DatabaseService:
             """
             
             with self.engine.begin() as conn:
-                result = conn.execute(text(query), (batch_type, total_users))
-                batch_id = result.lastrowid
+                result = conn.execute(text(query), [batch_type, total_users])
+                # SQLAlchemy 2.x 방식으로 lastrowid 접근
+                batch_id = result.inserted_primary_key[0] if result.inserted_primary_key else None
             
             logger.info(f"✅ 배치 로그 생성: batch_id={batch_id}, type={batch_type}")
             return batch_id
@@ -406,10 +425,10 @@ class DatabaseService:
             """
             
             with self.engine.begin() as conn:
-                conn.execute(text(query), (
+                conn.execute(text(query), [
                     processed_users, total_recommendations, 
                     status, error_message, status, batch_id
-                ))
+                ])
             
             logger.info(f"✅ 배치 로그 업데이트: batch_id={batch_id}, status={status}")
             return True
@@ -421,30 +440,19 @@ class DatabaseService:
     def get_users_for_batch_processing(self, batch_type: str = "full") -> List[int]:
         """배치 처리 대상 사용자 조회"""
         if batch_type == "incremental":
-            # 최근 활동한 사용자만
+            # 최근 활동한 사용자만 (24시간으로 확장)
             query = """
             SELECT DISTINCT user_id 
             FROM user_actions 
-            WHERE action_time >= DATE_SUB(NOW(), INTERVAL 6 HOUR)
-            UNION
-            SELECT DISTINCT user_id 
-            FROM recommendations 
-            WHERE created_at < DATE_SUB(NOW(), INTERVAL 6 HOUR)
+            WHERE action_time >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
             ORDER BY user_id
             LIMIT 1000
             """
         else:
-            # 전체 사용자
+            # 전체 사용자 (모든 user_actions 데이터, 날짜 제한 없음)
             query = """
-            SELECT user_id 
-            FROM user 
-            WHERE user_id IN (
-                SELECT DISTINCT user_id FROM user_actions
-                UNION 
-                SELECT DISTINCT user_id FROM likes
-                UNION
-                SELECT DISTINCT user_id FROM log_comment
-            )
+            SELECT DISTINCT user_id 
+            FROM user_actions 
             ORDER BY user_id
             """
         
@@ -454,6 +462,29 @@ class DatabaseService:
             
             user_ids = df['user_id'].tolist()
             logger.info(f"✅ 배치 처리 대상 사용자 조회: {len(user_ids)}명 ({batch_type})")
+            
+            # 디버깅: 실제 user_actions 데이터 확인
+            total_query = "SELECT COUNT(*) as total, COUNT(DISTINCT user_id) as unique_users FROM user_actions"
+            total_df = pd.read_sql(total_query, conn)
+            logger.info(f"📊 전체 user_actions: {total_df.iloc[0]['total']}건, 고유 사용자: {total_df.iloc[0]['unique_users']}명")
+            
+            # 날짜별 분포도 확인
+            if batch_type == "full":
+                date_query = """
+                SELECT 
+                    DATE(action_time) as action_date,
+                    COUNT(*) as daily_actions,
+                    COUNT(DISTINCT user_id) as daily_users
+                FROM user_actions 
+                GROUP BY DATE(action_time)
+                ORDER BY action_date DESC
+                LIMIT 7
+                """
+                date_df = pd.read_sql(date_query, conn)
+                logger.info("📅 최근 7일간 user_actions 분포:")
+                for _, row in date_df.iterrows():
+                    logger.info(f"   - {row['action_date']}: {row['daily_actions']}건, {row['daily_users']}명")
+            
             return user_ids
             
         except Exception as e:

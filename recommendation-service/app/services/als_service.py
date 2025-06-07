@@ -131,8 +131,8 @@ class ALSRecommendationService:
                 )
             else:
                 # 신규 사용자 - 인기도 기반
-                recommendations, algorithm = self._get_popularity_recommendations(
-                    rec_type, limit, exclude_items
+                recommendations, algorithm = self._get_user_based_recommendations(
+                    user_id, rec_type, limit, exclude_items
                 )
             
             # 필터 적용
@@ -308,6 +308,94 @@ class ALSRecommendationService:
         
         logger.info(f"인기도 기반 추천 완료: {len(recommendations)}개")
         return recommendations, "popularity_based"
+    
+    def _get_user_based_recommendations(
+        self, 
+        user_id: int,
+        rec_type: RecommendationType, 
+        limit: int,
+        exclude_items: List[int]
+    ) -> Tuple[List[RecommendationItem], str]:
+        """실시간 사용자 기반 추천 (user_actions 테이블 직접 조회)"""
+        
+        logger.info(f"실시간 사용자 기반 추천 생성 (user_id: {user_id})")
+        
+        try:
+            # 해당 사용자의 상호작용 데이터 조회
+            user_interactions = self.db_service.get_user_item_interactions()
+            user_data = user_interactions[user_interactions['user_id'] == user_id]
+            
+            if len(user_data) == 0:
+                logger.info(f"사용자 {user_id}의 상호작용 데이터 없음 - 인기도 기반으로 전환")
+                return self._get_popularity_recommendations(rec_type, limit, exclude_items)
+            
+            # 사용자가 상호작용한 아이템들
+            user_items = set(user_data['item_id'].tolist())
+            user_preferences = user_data.groupby('item_id')['rating'].mean().to_dict()
+            
+            logger.info(f"사용자 {user_id} 상호작용: {len(user_items)}개 아이템")
+            
+            # 전체 아이템에서 사용자가 아직 상호작용하지 않은 아이템 찾기
+            all_interactions = self.db_service.get_user_item_interactions()
+            all_items = set(all_interactions['item_id'].unique())
+            candidate_items = all_items - user_items - set(exclude_items)
+            
+            logger.info(f"추천 후보 아이템: {len(candidate_items)}개")
+            
+            if not candidate_items:
+                logger.info("추천 후보 아이템 없음 - 인기도 기반으로 전환")
+                return self._get_popularity_recommendations(rec_type, limit, exclude_items)
+            
+            # 후보 아이템들의 인기도 계산
+            item_popularity = all_interactions.groupby('item_id').agg({
+                'rating': ['count', 'mean'],
+                'user_id': 'nunique'
+            }).reset_index()
+            
+            item_popularity.columns = ['item_id', 'interaction_count', 'avg_rating', 'unique_users']
+            item_popularity = item_popularity[item_popularity['item_id'].isin(candidate_items)]
+            
+            # 사용자 선호도와 아이템 인기도를 결합한 점수 계산
+            item_popularity['combined_score'] = (
+                item_popularity['avg_rating'] * 0.4 +  # 평균 평점
+                (item_popularity['interaction_count'] / item_popularity['interaction_count'].max()) * 0.6  # 정규화된 상호작용 수
+            )
+            
+            # 상위 아이템 선택
+            top_items = item_popularity.nlargest(limit, 'combined_score')
+            
+            recommendations = []
+            for idx, row in top_items.iterrows():
+                item_id = int(row['item_id'])
+                score = float(row['combined_score'])
+                
+                metadata = self.item_metadata.get(str(item_id), {})
+                
+                recommendation = RecommendationItem(
+                    item_id=item_id,
+                    score=min(max(score, 0.1), 1.0),  # 0.1-1.0 범위로 정규화
+                    item_type=rec_type,
+                    title=metadata.get("title", f"여행 기록 {item_id}"),
+                    description=metadata.get("description", ""),
+                    image_url=metadata.get("image_url"),
+                    metadata={
+                        "method": "user_based_realtime",
+                        "user_interactions": len(user_items),
+                        "item_popularity": int(row['interaction_count']),
+                        "avg_rating": float(row['avg_rating']),
+                        "author_name": metadata.get("author_name"),
+                        "author_nickname": metadata.get("author_nickname"),
+                        **metadata.get("extra", {})
+                    }
+                )
+                recommendations.append(recommendation)
+            
+            logger.info(f"실시간 사용자 기반 추천 완료: {len(recommendations)}개")
+            return recommendations, "user_based_realtime"
+            
+        except Exception as e:
+            logger.error(f"실시간 사용자 기반 추천 실패: {str(e)}")
+            return self._get_popularity_recommendations(rec_type, limit, exclude_items)
     
     def _apply_filters(
         self, 
