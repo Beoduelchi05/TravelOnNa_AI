@@ -173,6 +173,7 @@ class DatabaseService:
         if not item_ids:
             return {}
             
+        # 안전한 방식으로 수정: named parameter로 변경하기보다는 확실한 tuple 사용
         placeholders = ','.join(['%s'] * len(item_ids))
         query = f"""
         SELECT 
@@ -195,7 +196,8 @@ class DatabaseService:
         
         try:
             with self.engine.connect() as conn:
-                df = pd.read_sql(query, conn, params=tuple(item_ids))
+                # pandas read_sql은 tuple을 안전하게 처리하지만, 명시적으로 변환
+                df = pd.read_sql(query, conn, params=tuple(int(item_id) for item_id in item_ids))
             
             metadata = {}
             for _, row in df.iterrows():
@@ -314,12 +316,12 @@ class DatabaseService:
              LIMIT 1) as preferred_location
         FROM user u
         LEFT JOIN profile p ON u.user_id = p.user_id
-        WHERE u.user_id = %s
+        WHERE u.user_id = %(user_id)s
         """
         
         try:
             with self.engine.connect() as conn:
-                df = pd.read_sql(query, conn, params=[user_id])
+                df = pd.read_sql(query, conn, params={'user_id': int(user_id)})
             
             if len(df) > 0:
                 row = df.iloc[0]
@@ -352,14 +354,12 @@ class DatabaseService:
             user_ids = list(set([rec['user_id'] for rec in recommendations]))
             
             with self.engine.begin() as conn:
-                # 1. 기존 데이터 삭제
+                # 1. 기존 데이터 삭제 - named parameter 방식으로 수정
                 if user_ids:
-                    placeholders = ','.join(['%s'] * len(user_ids))
-                    delete_query = f"""
-                    DELETE FROM recommendations 
-                    WHERE user_id IN ({placeholders})
-                    """
-                    conn.execute(text(delete_query), tuple(user_ids))
+                    # 하나씩 삭제하는 방식으로 변경 (더 안전)
+                    delete_query = text("DELETE FROM recommendations WHERE user_id = :user_id")
+                    for user_id in user_ids:
+                        conn.execute(delete_query, {'user_id': int(user_id)})
                     logger.info(f"🗑️ 기존 추천 데이터 삭제 완료: {len(user_ids)}명")
                 
                 # 2. 새 데이터 삽입 - 하나씩 삽입하는 안전한 방법
@@ -395,15 +395,18 @@ class DatabaseService:
     def create_batch_log(self, batch_type: str, total_users: int) -> Optional[int]:
         """배치 처리 로그 생성"""
         try:
-            query = """
+            query = text("""
             INSERT INTO recommendation_batch_logs 
             (batch_type, total_users, processed_users, total_recommendations, 
              start_time, status)
-            VALUES (%s, %s, 0, 0, NOW(), 'running')
-            """
+            VALUES (:batch_type, :total_users, 0, 0, NOW(), 'running')
+            """)
             
             with self.engine.begin() as conn:
-                result = conn.execute(text(query), [batch_type, total_users])
+                result = conn.execute(query, {
+                    'batch_type': str(batch_type),
+                    'total_users': int(total_users)
+                })
                 # SQLAlchemy 2.x 방식으로 lastrowid 접근
                 batch_id = result.inserted_primary_key[0] if result.inserted_primary_key else None
             
@@ -419,21 +422,25 @@ class DatabaseService:
                         error_message: Optional[str] = None) -> bool:
         """배치 처리 로그 업데이트"""
         try:
-            query = """
+            query = text("""
             UPDATE recommendation_batch_logs 
-            SET processed_users = %s,
-                total_recommendations = %s,
-                status = %s,
-                error_message = %s,
-                end_time = CASE WHEN %s IN ('completed', 'failed') THEN NOW() ELSE end_time END
-            WHERE batch_id = %s
-            """
+            SET processed_users = :processed_users,
+                total_recommendations = :total_recommendations,
+                status = :status,
+                error_message = :error_message,
+                end_time = CASE WHEN :status_check IN ('completed', 'failed') THEN NOW() ELSE end_time END
+            WHERE batch_id = :batch_id
+            """)
             
             with self.engine.begin() as conn:
-                conn.execute(text(query), [
-                    processed_users, total_recommendations, 
-                    status, error_message, status, batch_id
-                ])
+                conn.execute(query, {
+                    'processed_users': int(processed_users),
+                    'total_recommendations': int(total_recommendations),
+                    'status': str(status),
+                    'error_message': str(error_message) if error_message else None,
+                    'status_check': str(status),
+                    'batch_id': int(batch_id)
+                })
             
             logger.info(f"✅ 배치 로그 업데이트: batch_id={batch_id}, status={status}")
             return True
