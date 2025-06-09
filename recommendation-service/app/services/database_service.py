@@ -350,50 +350,46 @@ class DatabaseService:
         try:
             # 기존 추천 결과 삭제 (사용자별)
             user_ids = list(set([rec['user_id'] for rec in recommendations]))
-            placeholders = ','.join(['%s'] * len(user_ids))
-            
-            delete_query = f"""
-            DELETE FROM recommendations 
-            WHERE user_id IN ({placeholders})
-            """
-            
-            # 새로운 추천 결과 삽입 (현재 스키마에 맞게)
-            insert_query = """
-            INSERT INTO recommendations 
-            (user_id, item_id, item_type, score, created_at)
-            VALUES (%s, %s, %s, %s, NOW())
-            """
             
             with self.engine.begin() as conn:
-                # 기존 데이터 삭제
+                # 1. 기존 데이터 삭제
                 if user_ids:
+                    placeholders = ','.join(['%s'] * len(user_ids))
+                    delete_query = f"""
+                    DELETE FROM recommendations 
+                    WHERE user_id IN ({placeholders})
+                    """
                     conn.execute(text(delete_query), tuple(user_ids))
+                    logger.info(f"🗑️ 기존 추천 데이터 삭제 완료: {len(user_ids)}명")
                 
-                # 새 데이터 삽입 - executemany 사용
-                insert_data = []
+                # 2. 새 데이터 삽입 - 하나씩 삽입하는 안전한 방법
+                insert_query = text("""
+                    INSERT INTO recommendations 
+                    (user_id, item_id, item_type, score, created_at)
+                    VALUES (:user_id, :item_id, :item_type, :score, NOW())
+                """)
+                
+                inserted_count = 0
                 for rec in recommendations:
-                    insert_data.append({
-                        'user_id': rec['user_id'],
-                        'item_id': rec['item_id'], 
-                        'item_type': rec['item_type'],
-                        'score': rec['score']
-                    })
-                
-                # executemany로 배치 삽입
-                conn.execute(
-                    text("""
-                        INSERT INTO recommendations 
-                        (user_id, item_id, item_type, score, created_at)
-                        VALUES (:user_id, :item_id, :item_type, :score, NOW())
-                    """),
-                    insert_data
-                )
+                    try:
+                        conn.execute(insert_query, {
+                            'user_id': int(rec['user_id']),
+                            'item_id': int(rec['item_id']), 
+                            'item_type': str(rec['item_type']),
+                            'score': float(rec['score'])
+                        })
+                        inserted_count += 1
+                    except Exception as insert_error:
+                        logger.warning(f"⚠️ 개별 추천 삽입 실패: user_id={rec.get('user_id')}, item_id={rec.get('item_id')}, error={str(insert_error)}")
+                        continue
             
-            logger.info(f"✅ 추천 결과 배치 저장 완료: {len(recommendations)}건")
+            logger.info(f"✅ 추천 결과 배치 저장 완료: {inserted_count}/{len(recommendations)}건")
             return True
             
         except Exception as e:
             logger.error(f"❌ 추천 결과 배치 저장 실패: {str(e)}")
+            import traceback
+            logger.error(f"상세 오류: {traceback.format_exc()}")
             return False
     
     def create_batch_log(self, batch_type: str, total_users: int) -> Optional[int]:
