@@ -366,19 +366,28 @@ class DatabaseService:
             
             with self.engine.begin() as conn:
                 # 기존 데이터 삭제
-                conn.execute(text(delete_query), tuple(user_ids))
+                if user_ids:
+                    conn.execute(text(delete_query), tuple(user_ids))
                 
-                # 새 데이터 삽입
+                # 새 데이터 삽입 - executemany 사용
                 insert_data = []
                 for rec in recommendations:
-                    insert_data.append((
-                        rec['user_id'],
-                        rec['item_id'], 
-                        rec['item_type'],
-                        rec['score']
-                    ))
+                    insert_data.append({
+                        'user_id': rec['user_id'],
+                        'item_id': rec['item_id'], 
+                        'item_type': rec['item_type'],
+                        'score': rec['score']
+                    })
                 
-                conn.execute(text(insert_query), insert_data)
+                # executemany로 배치 삽입
+                conn.execute(
+                    text("""
+                        INSERT INTO recommendations 
+                        (user_id, item_id, item_type, score, created_at)
+                        VALUES (:user_id, :item_id, :item_type, :score, NOW())
+                    """),
+                    insert_data
+                )
             
             logger.info(f"✅ 추천 결과 배치 저장 완료: {len(recommendations)}건")
             return True
