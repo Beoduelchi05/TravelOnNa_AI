@@ -299,7 +299,7 @@ class ALSRecommendationService:
                     metadata={
                         "method": "popularity_based_matrix",
                         "popularity_rank": count + 1,
-                        "interaction_count": int(popularity_score),
+                        "popularity_score": float(popularity_score),
                         **metadata.get("extra", {})
                     }
                 )

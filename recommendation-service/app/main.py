@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 
 from app.api.recommendation import router as recommendation_router
 from app.models.schemas import HealthResponse
+from app.services.als_service import ALSRecommendationService
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -14,10 +15,23 @@ logger = get_logger(__name__)
 # 애플리케이션 시작 시간
 start_time = time.time()
 
+# ALS 서비스 인스턴스 (헬스체크용)
+als_service = None
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 시작 시 실행
     logger.info("🚀 추천 서비스 시작")
+    global als_service
+    try:
+        als_service = ALSRecommendationService()
+        if als_service.is_loaded:
+            logger.info("✅ ALS 모델 로딩 완료")
+        else:
+            logger.warning("⚠️ ALS 모델 로딩 실패")
+    except Exception as e:
+        logger.error(f"❌ ALS 서비스 초기화 실패: {str(e)}")
+        als_service = None
     yield
     # 종료 시 실행  
     logger.info("🛑 추천 서비스 종료")
@@ -58,22 +72,26 @@ app.include_router(recommendation_router)
 @app.get("/", response_model=HealthResponse)
 async def root():
     """루트 엔드포인트"""
+    model_loaded = als_service.is_loaded if als_service else False
     return HealthResponse(
-        status="healthy",
+        status="healthy" if model_loaded else "degraded",
         service="recommendation",
         version="1.0.0",
-        model_loaded=True,  # 임시로 True
+        model_loaded=model_loaded,
         uptime=time.time() - start_time
     )
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """헬스체크 엔드포인트"""
+    model_loaded = als_service.is_loaded if als_service else False
+    status = "healthy" if model_loaded else "degraded"
+    
     return HealthResponse(
-        status="healthy",
+        status=status,
         service="recommendation",
         version="1.0.0", 
-        model_loaded=True,  # 임시로 True
+        model_loaded=model_loaded,
         uptime=time.time() - start_time
     )
 

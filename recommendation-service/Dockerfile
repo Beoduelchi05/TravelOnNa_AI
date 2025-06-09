@@ -50,6 +50,9 @@ COPY . .
 RUN mkdir -p /app/models
 COPY models/ /app/models/
 
+# 로그 디렉토리 생성
+RUN mkdir -p /app/logs
+
 # 시작 스크립트 실행 권한 부여
 RUN chmod +x start.sh
 

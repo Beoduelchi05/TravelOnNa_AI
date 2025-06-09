@@ -457,33 +457,42 @@ class DatabaseService:
             """
         
         try:
+            # 메인 쿼리 실행
             with self.engine.connect() as conn:
                 df = pd.read_sql(query, conn)
             
             user_ids = df['user_id'].tolist()
             logger.info(f"✅ 배치 처리 대상 사용자 조회: {len(user_ids)}명 ({batch_type})")
             
-            # 디버깅: 실제 user_actions 데이터 확인
-            total_query = "SELECT COUNT(*) as total, COUNT(DISTINCT user_id) as unique_users FROM user_actions"
-            total_df = pd.read_sql(total_query, conn)
-            logger.info(f"📊 전체 user_actions: {total_df.iloc[0]['total']}건, 고유 사용자: {total_df.iloc[0]['unique_users']}명")
+            # 디버깅: 실제 user_actions 데이터 확인 (새로운 커넥션 사용)
+            try:
+                with self.engine.connect() as conn:
+                    total_query = "SELECT COUNT(*) as total, COUNT(DISTINCT user_id) as unique_users FROM user_actions"
+                    total_df = pd.read_sql(total_query, conn)
+                    logger.info(f"📊 전체 user_actions: {total_df.iloc[0]['total']}건, 고유 사용자: {total_df.iloc[0]['unique_users']}명")
+            except Exception as e:
+                logger.warning(f"⚠️ 전체 통계 조회 실패 (무시함): {str(e)}")
             
-            # 날짜별 분포도 확인
+            # 날짜별 분포도 확인 (새로운 커넥션 사용)
             if batch_type == "full":
-                date_query = """
-                SELECT 
-                    DATE(action_time) as action_date,
-                    COUNT(*) as daily_actions,
-                    COUNT(DISTINCT user_id) as daily_users
-                FROM user_actions 
-                GROUP BY DATE(action_time)
-                ORDER BY action_date DESC
-                LIMIT 7
-                """
-                date_df = pd.read_sql(date_query, conn)
-                logger.info("📅 최근 7일간 user_actions 분포:")
-                for _, row in date_df.iterrows():
-                    logger.info(f"   - {row['action_date']}: {row['daily_actions']}건, {row['daily_users']}명")
+                try:
+                    with self.engine.connect() as conn:
+                        date_query = """
+                        SELECT 
+                            DATE(action_time) as action_date,
+                            COUNT(*) as daily_actions,
+                            COUNT(DISTINCT user_id) as daily_users
+                        FROM user_actions 
+                        GROUP BY DATE(action_time)
+                        ORDER BY action_date DESC
+                        LIMIT 7
+                        """
+                        date_df = pd.read_sql(date_query, conn)
+                        logger.info("📅 최근 7일간 user_actions 분포:")
+                        for _, row in date_df.iterrows():
+                            logger.info(f"   - {row['action_date']}: {row['daily_actions']}건, {row['daily_users']}명")
+                except Exception as e:
+                    logger.warning(f"⚠️ 날짜별 분포 조회 실패 (무시함): {str(e)}")
             
             return user_ids
             

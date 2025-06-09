@@ -29,11 +29,11 @@ class BatchService:
             logger.warning("⚠️ 배치 처리 대상 사용자가 없습니다")
             return False
         
-        # 배치 로그 생성
+        # 배치 로그 생성 (실패해도 계속 진행)
         batch_id = self.db_service.create_batch_log("full", len(user_ids))
         if not batch_id:
-            logger.error("❌ 배치 로그 생성 실패")
-            return False
+            logger.warning("⚠️ 배치 로그 생성 실패 - 배치 처리는 계속 진행")
+            batch_id = -1  # 임시 ID
         
         try:
             all_recommendations = []
@@ -62,25 +62,32 @@ class BatchService:
                 # 배치 단위로 DB 저장
                 if all_recommendations:
                     success = self.db_service.save_recommendations_batch(
-                        all_recommendations[-len(batch_users)*10:], batch_id
+                        all_recommendations[-len(batch_users)*10:], batch_id if batch_id > 0 else 0
                     )
                     if not success:
                         logger.error("❌ 배치 저장 실패")
                         break
             
-            # 최종 배치 로그 업데이트
-            self.db_service.update_batch_log(
-                batch_id, processed_users, len(all_recommendations), "completed"
-            )
+            # 최종 배치 로그 업데이트 (batch_id가 유효한 경우만)
+            if batch_id > 0:
+                self.db_service.update_batch_log(
+                    batch_id, processed_users, len(all_recommendations), "completed"
+                )
             
             logger.info(f"✅ 전체 배치 처리 완료: {processed_users}명, {len(all_recommendations)}건 추천")
+            
+            # 배치 로그를 파일에도 기록
+            self._write_batch_log_to_file("full", processed_users, len(all_recommendations), "completed")
+            
             return True
             
         except Exception as e:
             logger.error(f"❌ 전체 배치 처리 실패: {str(e)}")
-            self.db_service.update_batch_log(
-                batch_id, processed_users, 0, "failed", str(e)
-            )
+            if batch_id > 0:
+                self.db_service.update_batch_log(
+                    batch_id, processed_users, 0, "failed", str(e)
+                )
+            self._write_batch_log_to_file("full", processed_users, 0, "failed", str(e))
             return False
     
     async def run_incremental_batch(self) -> bool:
@@ -93,11 +100,11 @@ class BatchService:
             logger.info("ℹ️ 증분 처리 대상 사용자가 없습니다")
             return True
         
-        # 배치 로그 생성
+        # 배치 로그 생성 (실패해도 계속 진행)
         batch_id = self.db_service.create_batch_log("incremental", len(user_ids))
         if not batch_id:
-            logger.error("❌ 배치 로그 생성 실패")
-            return False
+            logger.warning("⚠️ 배치 로그 생성 실패 - 배치 처리는 계속 진행")
+            batch_id = -1  # 임시 ID
         
         try:
             all_recommendations = []
@@ -116,27 +123,44 @@ class BatchService:
             # DB 저장
             if all_recommendations:
                 success = self.db_service.save_recommendations_batch(
-                    all_recommendations, batch_id
+                    all_recommendations, batch_id if batch_id > 0 else 0
                 )
                 
                 if success:
-                    self.db_service.update_batch_log(
-                        batch_id, processed_users, len(all_recommendations), "completed"
-                    )
+                    if batch_id > 0:
+                        self.db_service.update_batch_log(
+                            batch_id, processed_users, len(all_recommendations), "completed"
+                        )
                     logger.info(f"✅ 증분 배치 처리 완료: {processed_users}명, {len(all_recommendations)}건 추천")
+                    
+                    # 배치 로그를 파일에도 기록
+                    self._write_batch_log_to_file("incremental", processed_users, len(all_recommendations), "completed")
+                    
                     return True
                 else:
                     logger.error("❌ 증분 배치 저장 실패")
+                    if batch_id > 0:
+                        self.db_service.update_batch_log(
+                            batch_id, processed_users, 0, "failed", "저장 실패"
+                        )
+                    self._write_batch_log_to_file("incremental", processed_users, 0, "failed", "저장 실패")
                     return False
             else:
                 logger.info("ℹ️ 생성된 추천이 없습니다")
+                if batch_id > 0:
+                    self.db_service.update_batch_log(
+                        batch_id, processed_users, 0, "completed"
+                    )
+                self._write_batch_log_to_file("incremental", processed_users, 0, "completed", "추천 없음")
                 return True
                 
         except Exception as e:
             logger.error(f"❌ 증분 배치 처리 실패: {str(e)}")
-            self.db_service.update_batch_log(
-                batch_id, processed_users, 0, "failed", str(e)
-            )
+            if batch_id > 0:
+                self.db_service.update_batch_log(
+                    batch_id, processed_users, 0, "failed", str(e)
+                )
+            self._write_batch_log_to_file("incremental", processed_users, 0, "failed", str(e))
             return False
     
     async def _generate_user_recommendations(self, user_id: int) -> List[Dict[str, Any]]:
@@ -199,12 +223,39 @@ class BatchService:
         schedule.clear()
         logger.info("🛑 스케줄러 중지됨")
     
+    def _write_batch_log_to_file(self, batch_type: str, processed_users: int, 
+                                total_recommendations: int, status: str, 
+                                error_message: str = None):
+        """배치 로그를 파일에 기록 (DB 실패 시 백업용)"""
+        try:
+            import os
+            from datetime import datetime
+            
+            log_file = "/app/logs/batch.log"
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            log_entry = f"[{timestamp}] {batch_type.upper()} BATCH - "
+            log_entry += f"Status: {status}, Users: {processed_users}, Recommendations: {total_recommendations}"
+            
+            if error_message:
+                log_entry += f", Error: {error_message}"
+            
+            log_entry += "\n"
+            
+            # 로그 파일에 추가
+            os.makedirs(os.path.dirname(log_file), exist_ok=True)
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(log_entry)
+                
+        except Exception as e:
+            logger.error(f"❌ 파일 로그 기록 실패: {str(e)}")
+    
     def _run_full_batch_sync(self):
-        """동기 방식 전체 배치 실행"""
+        """동기 방식으로 전체 배치 실행 (스케줄러용)"""
         asyncio.run(self.run_full_batch())
     
     def _run_incremental_batch_sync(self):
-        """동기 방식 증분 배치 실행"""
+        """동기 방식으로 증분 배치 실행 (스케줄러용)"""
         asyncio.run(self.run_incremental_batch())
     
     async def manual_batch_trigger(self, batch_type: str = "incremental") -> Dict[str, Any]:
