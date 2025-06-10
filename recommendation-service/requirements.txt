@@ -35,3 +35,6 @@ wheel>=0.37.0
 
 # Schedule dependency for batch processing
 schedule==1.2.0
+
+# Memory monitoring
+psutil==5.9.6
