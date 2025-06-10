@@ -163,6 +163,81 @@ class BatchService:
             self._write_batch_log_to_file("incremental", processed_users, 0, "failed", str(e))
             return False
     
+    async def run_mini_batch(self, user_limit: int = 50) -> bool:
+        """Mini 배치 처리 (사용자 수 제한)"""
+        logger.info(f"🔄 Mini 배치 처리 시작 (최대 {user_limit}명)")
+        
+        # 제한된 수의 사용자 조회
+        all_user_ids = self.db_service.get_users_for_batch_processing("full")
+        if not all_user_ids:
+            logger.info("ℹ️ 배치 처리 대상 사용자가 없습니다")
+            return True
+        
+        # 사용자 수 제한
+        user_ids = all_user_ids[:user_limit]
+        logger.info(f"📊 전체 사용자: {len(all_user_ids)}명, Mini 배치 대상: {len(user_ids)}명")
+        
+        # 배치 로그 생성
+        batch_id = self.db_service.create_batch_log("mini", len(user_ids))
+        if not batch_id:
+            logger.warning("⚠️ 배치 로그 생성 실패 - 배치 처리는 계속 진행")
+            batch_id = -1
+        
+        try:
+            all_recommendations = []
+            processed_users = 0
+            
+            # 사용자별 추천 생성 (소규모 배치)
+            batch_size = 20  # mini batch는 더 작은 단위로
+            for i in range(0, len(user_ids), batch_size):
+                batch_users = user_ids[i:i + batch_size]
+                
+                for user_id in batch_users:
+                    try:
+                        user_recs = await self._generate_user_recommendations(user_id)
+                        all_recommendations.extend(user_recs)
+                        processed_users += 1
+                        
+                        # 진행상황 로깅 (mini batch는 더 자주)
+                        if processed_users % 10 == 0:
+                            logger.info(f"📊 Mini 배치 진행: {processed_users}/{len(user_ids)} 사용자 처리 완료")
+                            
+                    except Exception as e:
+                        logger.error(f"❌ 사용자 {user_id} 추천 생성 실패: {str(e)}")
+                        continue
+                
+                # 배치 단위로 DB 저장
+                if all_recommendations:
+                    batch_recs = all_recommendations[-len(batch_users)*10:]
+                    success = self.db_service.save_recommendations_batch(
+                        batch_recs, batch_id if batch_id > 0 else 0
+                    )
+                    if not success:
+                        logger.error("❌ Mini 배치 저장 실패")
+                        break
+            
+            # 최종 배치 로그 업데이트
+            if batch_id > 0:
+                self.db_service.update_batch_log(
+                    batch_id, processed_users, len(all_recommendations), "completed"
+                )
+            
+            logger.info(f"✅ Mini 배치 처리 완료: {processed_users}명, {len(all_recommendations)}건 추천")
+            
+            # 파일 로그 기록
+            self._write_batch_log_to_file("mini", processed_users, len(all_recommendations), "completed")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Mini 배치 처리 실패: {str(e)}")
+            if batch_id > 0:
+                self.db_service.update_batch_log(
+                    batch_id, processed_users, 0, "failed", str(e)
+                )
+            self._write_batch_log_to_file("mini", processed_users, 0, "failed", str(e))
+            return False
+    
     async def _generate_user_recommendations(self, user_id: int) -> List[Dict[str, Any]]:
         """개별 사용자 추천 생성"""
         recommendations = []
@@ -258,15 +333,19 @@ class BatchService:
         """동기 방식으로 증분 배치 실행 (스케줄러용)"""
         asyncio.run(self.run_incremental_batch())
     
-    async def manual_batch_trigger(self, batch_type: str = "incremental") -> Dict[str, Any]:
+    async def manual_batch_trigger(self, batch_type: str = "incremental", user_limit: int = None) -> Dict[str, Any]:
         """수동 배치 트리거 (API용)"""
-        logger.info(f"🔧 수동 배치 트리거: {batch_type}")
+        logger.info(f"🔧 수동 배치 트리거: {batch_type}" + (f" (최대 {user_limit}명)" if user_limit else ""))
         
         start_time = datetime.now()
         
         if batch_type == "full":
             success = await self.run_full_batch()
-        else:
+        elif batch_type == "mini":
+            if user_limit is None:
+                user_limit = 50  # 기본값
+            success = await self.run_mini_batch(user_limit)
+        else:  # incremental
             success = await self.run_incremental_batch()
         
         end_time = datetime.now()
@@ -275,6 +354,7 @@ class BatchService:
         return {
             "success": success,
             "batch_type": batch_type,
+            "user_limit": user_limit if batch_type == "mini" else None,
             "start_time": start_time.isoformat(),
             "end_time": end_time.isoformat(),
             "duration_seconds": duration

@@ -303,30 +303,48 @@ async def get_model_info():
 
 @router.post("/batch/trigger")
 async def trigger_batch(
-    batch_type: str = Query(default="incremental", description="배치 타입: full 또는 incremental")
+    batch_type: str = Query(default="incremental", description="배치 타입: full 또는 incremental"),
+    user_limit: int = Query(default=None, description="처리할 최대 사용자 수 (full batch 전용)")
 ):
-    """수동 배치 처리 트리거"""
+    """수동 배치 처리 트리거 (비동기 실행)"""
     if batch_type not in ["full", "incremental"]:
         raise HTTPException(status_code=400, detail="batch_type은 'full' 또는 'incremental'이어야 합니다")
     
     try:
         from app.services.batch_service import BatchService
+        import asyncio
+        
         batch_service = BatchService()
         
-        result = await batch_service.manual_batch_trigger(batch_type)
+        # 배치 처리를 백그라운드에서 비동기 실행
+        async def run_batch_background():
+            if batch_type == "full":
+                if user_limit:
+                    # 사용자 수 제한된 배치
+                    success = await batch_service.run_mini_batch(user_limit)
+                else:
+                    # 전체 배치
+                    success = await batch_service.run_full_batch()
+            else:
+                success = await batch_service.run_incremental_batch()
+            
+            logger.info(f"🎯 백그라운드 배치 완료: {batch_type}, 성공: {success}")
         
+        # 백그라운드 태스크 시작
+        asyncio.create_task(run_batch_background())
+        
+        # 즉시 응답 반환
         return {
-            "message": f"{batch_type} 배치 처리가 완료되었습니다",
-            "success": result["success"],
-            "batch_type": result["batch_type"],
-            "start_time": result["start_time"],
-            "end_time": result["end_time"], 
-            "duration_seconds": result["duration_seconds"]
+            "message": f"{batch_type} 배치 처리가 백그라운드에서 시작되었습니다",
+            "batch_type": batch_type,
+            "user_limit": user_limit,
+            "status": "started",
+            "note": "진행상황은 /batch/status API로 확인하세요"
         }
         
     except Exception as e:
-        logger.error(f"❌ 배치 처리 실패: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"배치 처리 중 오류가 발생했습니다: {str(e)}")
+        logger.error(f"❌ 배치 처리 시작 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"배치 처리 시작 중 오류가 발생했습니다: {str(e)}")
 
 @router.get("/batch/status")
 async def get_batch_status():
