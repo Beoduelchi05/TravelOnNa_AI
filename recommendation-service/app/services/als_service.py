@@ -116,34 +116,79 @@ class ALSRecommendationService:
         filters: Optional[Dict] = None,
         exclude_items: Optional[List[int]] = None
     ) -> Tuple[List[RecommendationItem], str]:
-        """사용자별 추천 생성"""
+        """사용자별 추천 생성 (하이브리드 방식: 개인화 + 콜드스타트)"""
         
         if not self.is_loaded:
             raise RuntimeError("모델이 로드되지 않았습니다.")
         
         exclude_items = exclude_items or []
+        final_recommendations = []
+        algorithm_used = ""
         
         try:
             if user_id in self.user_id_map:
-                # 기존 사용자 - 협업 필터링
-                recommendations, algorithm = self._get_collaborative_recommendations(
+                # 기존 사용자 - 협업 필터링 시도
+                logger.info(f"🎯 사용자 {user_id}: 협업 필터링 추천 시작")
+                personal_recs, personal_algo = self._get_collaborative_recommendations(
                     user_id, rec_type, limit, exclude_items
                 )
+                final_recommendations.extend(personal_recs)
+                algorithm_used = personal_algo
+                
+                logger.info(f"📊 개인화 추천 결과: {len(personal_recs)}개 (목표: {limit}개)")
+                
             else:
-                # 신규 사용자 - 인기도 기반
-                recommendations, algorithm = self._get_user_based_recommendations(
+                # 신규 사용자 - 실시간 사용자 기반 추천 시도
+                logger.info(f"🆕 사용자 {user_id}: 신규 사용자 - 실시간 분석 시작")
+                personal_recs, personal_algo = self._get_user_based_recommendations(
                     user_id, rec_type, limit, exclude_items
                 )
+                final_recommendations.extend(personal_recs)
+                algorithm_used = personal_algo
+                
+                logger.info(f"📊 실시간 추천 결과: {len(personal_recs)}개 (목표: {limit}개)")
+            
+            # **하이브리드 로직**: 추천이 부족하면 콜드스타트로 채우기
+            remaining_count = limit - len(final_recommendations)
+            if remaining_count > 0:
+                logger.info(f"🔄 추천 부족 ({len(final_recommendations)}/{limit}) - 콜드스타트로 {remaining_count}개 채우기")
+                
+                # 이미 추천된 아이템들을 제외 목록에 추가
+                used_item_ids = [rec.item_id for rec in final_recommendations]
+                extended_exclude = exclude_items + used_item_ids
+                
+                # 콜드스타트 추천 생성
+                coldstart_recs, coldstart_algo = self._get_popularity_recommendations(
+                    rec_type, remaining_count, extended_exclude
+                )
+                
+                # 콜드스타트 추천을 추가하고 메타데이터에 표시
+                for rec in coldstart_recs:
+                    rec.metadata["hybrid_source"] = "coldstart_filler"
+                    rec.metadata["original_method"] = rec.metadata.get("method", "unknown")
+                    rec.metadata["method"] = "hybrid"
+                
+                final_recommendations.extend(coldstart_recs)
+                
+                # 알고리즘 이름 업데이트
+                if len(coldstart_recs) > 0:
+                    algorithm_used = f"{algorithm_used}+coldstart_hybrid"
+                
+                logger.info(f"✅ 하이브리드 추천 완료: 개인화 {len(final_recommendations) - len(coldstart_recs)}개 + 콜드스타트 {len(coldstart_recs)}개")
             
             # 필터 적용
             if filters:
-                recommendations = self._apply_filters(recommendations, filters)
+                final_recommendations = self._apply_filters(final_recommendations, filters)
             
-            return recommendations[:limit], algorithm
+            # 최종 limit 적용
+            final_recommendations = final_recommendations[:limit]
+            
+            logger.info(f"🎯 최종 추천 결과: {len(final_recommendations)}개 (알고리즘: {algorithm_used})")
+            return final_recommendations, algorithm_used
             
         except Exception as e:
             logger.error(f"추천 생성 실패 (user_id: {user_id}): {str(e)}")
-            # fallback: 인기도 기반 추천
+            # fallback: 전체 인기도 기반 추천
             return self._get_popularity_recommendations(rec_type, limit, exclude_items)
     
     def _get_collaborative_recommendations(

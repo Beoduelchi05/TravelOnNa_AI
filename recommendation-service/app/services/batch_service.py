@@ -32,7 +32,7 @@ class BatchService:
         # 배치 로그 생성 (실패해도 계속 진행)
         batch_id = self.db_service.create_batch_log("full", len(user_ids))
         if not batch_id:
-            logger.warning("⚠️ 배치 로그 생성 실패 - 배치 처리는 계속 진행")
+            logger.info("ℹ️ DB 배치 로그 미사용 - 파일 로그만 사용하여 계속 진행")
             batch_id = -1  # 임시 ID
         
         try:
@@ -103,7 +103,7 @@ class BatchService:
         # 배치 로그 생성 (실패해도 계속 진행)
         batch_id = self.db_service.create_batch_log("incremental", len(user_ids))
         if not batch_id:
-            logger.warning("⚠️ 배치 로그 생성 실패 - 배치 처리는 계속 진행")
+            logger.info("ℹ️ DB 배치 로그 미사용 - 파일 로그만 사용하여 계속 진행")
             batch_id = -1  # 임시 ID
         
         try:
@@ -180,7 +180,7 @@ class BatchService:
         # 배치 로그 생성
         batch_id = self.db_service.create_batch_log("mini", len(user_ids))
         if not batch_id:
-            logger.warning("⚠️ 배치 로그 생성 실패 - 배치 처리는 계속 진행")
+            logger.info("ℹ️ DB 배치 로그 미사용 - 파일 로그만 사용하여 계속 진행")
             batch_id = -1
         
         try:

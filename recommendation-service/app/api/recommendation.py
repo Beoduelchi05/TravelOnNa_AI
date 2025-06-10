@@ -348,31 +348,85 @@ async def trigger_batch(
 
 @router.get("/batch/status")
 async def get_batch_status():
-    """최근 배치 처리 상태 조회"""
+    """최근 배치 처리 상태 조회 (파일 로그 기반)"""
     try:
-        from app.services.database_service import DatabaseService
-        db_service = DatabaseService()
+        import os
+        from datetime import datetime
         
-        # 최근 배치 로그 조회 (임시 구현)
-        with db_service.engine.connect() as conn:
-            query = """
-            SELECT batch_id, batch_type, total_users, processed_users, 
-                   total_recommendations, status, start_time, end_time,
-                   error_message
-            FROM recommendation_batch_logs 
-            ORDER BY start_time DESC 
-            LIMIT 10
-            """
-            import pandas as pd
-            df = pd.read_sql(query, conn)
-            
-        batch_logs = df.to_dict('records')
+        log_file = "/app/logs/batch.log"
+        batch_logs = []
         
-        return {
-            "message": "배치 상태 조회 성공",
+        # 파일 로그가 존재하는지 확인
+        if os.path.exists(log_file):
+            try:
+                with open(log_file, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                
+                # 최근 10개 로그만 파싱
+                recent_lines = lines[-10:] if len(lines) >= 10 else lines
+                
+                for line in recent_lines:
+                    if line.strip():
+                        try:
+                            # 로그 형식: [2024-01-08 14:30:00] FULL BATCH - Status: completed, Users: 50, Recommendations: 500
+                            parts = line.strip().split(" - ")
+                            if len(parts) >= 2:
+                                timestamp_part = parts[0].replace("[", "").replace("]", "")
+                                batch_type = timestamp_part.split()[-2] if "BATCH" in timestamp_part else "unknown"
+                                
+                                status_info = parts[1]
+                                status = "completed" if "completed" in status_info else ("failed" if "failed" in status_info else "unknown")
+                                
+                                # Users, Recommendations 숫자 추출
+                                users = 0
+                                recommendations = 0
+                                if "Users:" in status_info:
+                                    try:
+                                        users_part = status_info.split("Users:")[1].split(",")[0].strip()
+                                        users = int(users_part)
+                                    except:
+                                        users = 0
+                                
+                                if "Recommendations:" in status_info:
+                                    try:
+                                        rec_part = status_info.split("Recommendations:")[1].split(",")[0].strip()
+                                        recommendations = int(rec_part)
+                                    except:
+                                        recommendations = 0
+                                
+                                batch_logs.append({
+                                    "batch_type": batch_type.lower(),
+                                    "timestamp": timestamp_part.split("]")[0].replace("[", ""),
+                                    "status": status,
+                                    "processed_users": users,
+                                    "total_recommendations": recommendations,
+                                    "source": "file_log"
+                                })
+                        except Exception as e:
+                            logger.warning(f"로그 라인 파싱 실패: {line.strip()}, 오류: {str(e)}")
+                            continue
+                            
+            except Exception as e:
+                logger.error(f"배치 로그 파일 읽기 실패: {str(e)}")
+                
+        # 최신 순으로 정렬
+        batch_logs.reverse()
+        
+        # 메모리에서 현재 실행 중인 배치 정보도 포함 (간단 구현)
+        current_status = {
+            "message": f"배치 로그 파일에서 {len(batch_logs)}개의 기록을 발견했습니다" if batch_logs else "배치 실행 기록이 없습니다",
+            "log_file_path": log_file,
+            "log_file_exists": os.path.exists(log_file),
             "recent_batches": batch_logs
         }
         
+        return current_status
+        
     except Exception as e:
         logger.error(f"❌ 배치 상태 조회 실패: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"배치 상태 조회 중 오류가 발생했습니다: {str(e)}") 
+        return {
+            "message": f"배치 상태 조회 중 오류 발생: {str(e)}",
+            "log_file_path": "/app/logs/batch.log", 
+            "log_file_exists": False,
+            "recent_batches": []
+        } 

@@ -393,24 +393,27 @@ class DatabaseService:
             return False
     
     def create_batch_log(self, batch_type: str, total_users: int) -> Optional[int]:
-        """배치 처리 로그 생성"""
+        """배치 처리 로그 생성 (파일 로그만 사용)"""
         try:
-            query = text("""
-            INSERT INTO recommendation_batch_logs 
-            (batch_type, total_users, processed_users, total_recommendations, 
-             start_time, status)
-            VALUES (:batch_type, :total_users, 0, 0, NOW(), 'running')
-            """)
+            # DB 대신 파일 로그만 사용
+            import os
+            from datetime import datetime
             
-            with self.engine.begin() as conn:
-                result = conn.execute(query, {
-                    'batch_type': str(batch_type),
-                    'total_users': int(total_users)
-                })
-                # SQLAlchemy 2.x 방식으로 lastrowid 접근
-                batch_id = result.inserted_primary_key[0] if result.inserted_primary_key else None
+            log_file = "/app/logs/batch.log"
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            logger.info(f"✅ 배치 로그 생성: batch_id={batch_id}, type={batch_type}")
+            log_entry = f"[{timestamp}] {batch_type.upper()} BATCH STARTED - "
+            log_entry += f"Total Users: {total_users}, Status: started\n"
+            
+            # 로그 파일에 기록
+            os.makedirs(os.path.dirname(log_file), exist_ok=True)
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(log_entry)
+            
+            logger.info(f"✅ 배치 로그 생성 (파일): type={batch_type}, users={total_users}")
+            
+            # 가짜 batch_id 반환 (타임스탬프 기반)
+            batch_id = int(datetime.now().timestamp())
             return batch_id
             
         except Exception as e:
@@ -420,29 +423,30 @@ class DatabaseService:
     def update_batch_log(self, batch_id: int, processed_users: int, 
                         total_recommendations: int, status: str, 
                         error_message: Optional[str] = None) -> bool:
-        """배치 처리 로그 업데이트"""
+        """배치 처리 로그 업데이트 (파일 로그만 사용)"""
         try:
-            query = text("""
-            UPDATE recommendation_batch_logs 
-            SET processed_users = :processed_users,
-                total_recommendations = :total_recommendations,
-                status = :status,
-                error_message = :error_message,
-                end_time = CASE WHEN :status_check IN ('completed', 'failed') THEN NOW() ELSE end_time END
-            WHERE batch_id = :batch_id
-            """)
+            # DB 대신 파일 로그만 사용
+            import os
+            from datetime import datetime
             
-            with self.engine.begin() as conn:
-                conn.execute(query, {
-                    'processed_users': int(processed_users),
-                    'total_recommendations': int(total_recommendations),
-                    'status': str(status),
-                    'error_message': str(error_message) if error_message else None,
-                    'status_check': str(status),
-                    'batch_id': int(batch_id)
-                })
+            log_file = "/app/logs/batch.log"
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            logger.info(f"✅ 배치 로그 업데이트: batch_id={batch_id}, status={status}")
+            # 배치 타입 추정 (batch_id로는 알 수 없으므로 간단히 BATCH로 표시)
+            log_entry = f"[{timestamp}] BATCH UPDATE - "
+            log_entry += f"Status: {status}, Users: {processed_users}, Recommendations: {total_recommendations}"
+            
+            if error_message:
+                log_entry += f", Error: {error_message}"
+            
+            log_entry += "\n"
+            
+            # 로그 파일에 기록
+            os.makedirs(os.path.dirname(log_file), exist_ok=True)
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(log_entry)
+            
+            logger.info(f"✅ 배치 로그 업데이트 (파일): status={status}, users={processed_users}")
             return True
             
         except Exception as e:
