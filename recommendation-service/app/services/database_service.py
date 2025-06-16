@@ -227,7 +227,7 @@ class DatabaseService:
     def get_popular_items(self, rec_type: str, limit: int) -> List[int]:
         """인기 아이템 조회 (user_actions 기반으로 수정)"""
         if rec_type == "record":
-            # 먼저 user_actions 기반으로 인기도 계산 시도 (공개 로그만)
+            # 먼저 user_actions 기반으로 인기도 계산 시도 (공개 로그만, 조건 완화)
             query = """
             SELECT 
                 ua.target_id as log_id,
@@ -236,7 +236,7 @@ class DatabaseService:
             JOIN log l ON ua.target_id = l.log_id
             WHERE ua.target_type = 'log'
               AND ua.action_type IN ('like', 'comment', 'view', 'post')
-              AND ua.action_time >= DATE_SUB(NOW(), INTERVAL 3 MONTH)
+              AND ua.action_time >= DATE_SUB(NOW(), INTERVAL 12 MONTH)  -- 12개월로 확장
               AND l.is_public = 1  -- 공개 로그만
             GROUP BY ua.target_id
             ORDER BY popularity_score DESC, ua.action_time DESC
@@ -250,7 +250,7 @@ class DatabaseService:
             FROM place p
             JOIN plan pl ON p.plan_id = pl.plan_id
             WHERE pl.is_public = 1
-              AND p.created_at >= DATE_SUB(NOW(), INTERVAL 1 MONTH)
+              AND p.created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)  -- 6개월로 확장
             GROUP BY p.place_id
             ORDER BY popularity_score DESC
             LIMIT %s
@@ -271,26 +271,43 @@ class DatabaseService:
             
             item_ids = df['log_id'].tolist()
             
-            # user_actions 기반 결과가 비어있으면 최신 공개 로그로 fallback
-            if not item_ids and rec_type == "record":
-                logger.warning("⚠️ user_actions 기반 인기 아이템 없음, 최신 공개 로그로 fallback")
+            # user_actions 기반 결과가 부족하면 최신 공개 로그로 fallback
+            if len(item_ids) < limit and rec_type == "record":
+                logger.warning(f"⚠️ user_actions 기반 인기 아이템 부족 ({len(item_ids)}/{limit}), 최신 공개 로그로 보완")
                 fallback_query = """
                 SELECT log_id
                 FROM log
                 WHERE is_public = 1
+                  AND log_id NOT IN ({})
                 ORDER BY created_at DESC
                 LIMIT %s
-                """
-                df = pd.read_sql(fallback_query, conn, params=(limit,))
-                item_ids = df['log_id'].tolist()
+                """.format(','.join(map(str, item_ids)) if item_ids else '0')
+                
+                remaining_limit = limit - len(item_ids)
+                df_fallback = pd.read_sql(fallback_query, conn, params=(remaining_limit,))
+                fallback_ids = df_fallback['log_id'].tolist()
+                item_ids.extend(fallback_ids)
             
-            logger.info(f"✅ 인기 아이템 조회 완료: {len(item_ids)}개 (공개만)")
+            logger.info(f"✅ 인기 아이템 조회 완료: {len(item_ids)}개 (요청: {limit}개)")
             return item_ids
             
         except Exception as e:
             logger.error(f"❌ 인기 아이템 조회 실패: {str(e)}")
-            # 최종 폴백: 순차적 ID 반환
-            return list(range(1, limit + 1))
+            # 최종 폴백: 최신 공개 로그 반환
+            try:
+                with self.engine.connect() as conn:
+                    fallback_query = """
+                    SELECT log_id
+                    FROM log
+                    WHERE is_public = 1
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                    """
+                    df = pd.read_sql(fallback_query, conn, params=(limit,))
+                    return df['log_id'].tolist()
+            except:
+                logger.error("❌ 최종 폴백도 실패, 순차적 ID 반환")
+                return list(range(1, limit + 1))
     
     def get_user_preferences(self, user_id: int) -> Dict[str, Any]:
         """사용자 선호도 정보 조회"""
