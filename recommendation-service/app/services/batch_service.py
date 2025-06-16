@@ -303,11 +303,11 @@ class BatchService:
         recommendations = []
         
         try:
-            # 여행 기록 추천 (enum 사용)
+            # 여행 기록 추천 (enum 사용) - 더 많은 추천 생성
             log_recs, algorithm = self.rec_service.get_recommendations(
                 user_id=user_id, 
                 rec_type=RecommendationType.RECORD, 
-                limit=10
+                limit=50  # 10 → 50으로 증가 (더 많은 추천 생성)
             )
             
             for rec_item in log_recs:
