@@ -1,6 +1,6 @@
 # <a href="#" target="_blank">여행ON나 (TravelOnNa)</a>: AI 기반 소셜 관광 플랫폼 AI Micro Service
 
-![TravelOnNa Banner](./TravelOnNa_AI/recommendation-service/images/여행ON나_로고.png)
+![TravelOnNa Banner](./recommendation-service/images/여행ON나_로고.png)
 
 ![Python](https://img.shields.io/badge/python-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
@@ -25,7 +25,7 @@ TravelOnNa AI 추천시스템은 **협업 필터링(ALS Algorithm)**을 기반�
 
 ## 🏗️ 시스템 아키텍처
 
-<img src="./TravelOnNa_AI/recommendation-service/images/architecture.png">
+<img src="./recommendation-service/images/architecture.png">
 
 ## ✨ 주요 기능
 
