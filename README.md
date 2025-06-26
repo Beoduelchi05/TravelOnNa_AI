@@ -1,23 +1,16 @@
-# 🌟 TravelOnNa AI 추천시스템
+# <a href="#" target="_blank">여행ON나 (TravelOnNa)</a>: AI 기반 소셜 관광 플랫폼 AI Micro Service
 
-![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.104.1-green.svg)
-![Machine Learning](https://img.shields.io/badge/ML-ALS%20Algorithm-orange.svg)
-![Docker](https://img.shields.io/badge/docker-enabled-blue.svg)
-![Kubernetes](https://img.shields.io/badge/kubernetes-ready-green.svg)
+![TravelOnNa Banner](/images/여행ON나_로고.png)
+
+![Python](https://img.shields.io/badge/python-3776AB?style=for-the-badghe&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+![Machine Learning](https://img.shields.io/badge/ALS-6750A4?style=for-the-badge&logo=matrix&logoColor=white)
+![Jenkins](https://img.shields.io/badge/Jenkins-D24939?style=for-the-badge&logo=jenkins&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
+![Kubernetes](https://img.shields.io/badge/Kubernetes-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white)
+![Ansible](https://img.shields.io/badge/Ansible-EE0000?style=for-the-badge&logo=ansible&logoColor=white)
 
 **여행ON나 플랫폼의 AI 기반 개인화 추천 시스템**
-
-## 📋 목차
-- [프로젝트 개요](#-프로젝트-개요)
-- [시스템 아키텍처](#-시스템-아키텍처)
-- [주요 기능](#-주요-기능)
-- [기술 스택](#-기술-스택)
-- [디렉토리 구조](#-디렉토리-구조)
-- [빠른 시작](#-빠른-시작)
-- [API 문서](#-api-문서)
-- [배포](#-배포)
-- [모니터링](#-모니터링)
 
 ## 🎯 프로젝트 개요
 
@@ -32,42 +25,7 @@ TravelOnNa AI 추천시스템은 **협업 필터링(ALS Algorithm)**을 기반�
 
 ## 🏗️ 시스템 아키텍처
 
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│  Android App    │    │   Backend       │    │   AI Service    │
-│   (Kotlin)      │ -> │  (Spring Boot)  │ -> │   (FastAPI)     │
-│ Android Studio  │    │                 │    │                 │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-                                                       │
-                       ┌─────────────────┐             │
-                       │     MySQL       │ <-----------┘
-                       │   (User Data)   │
-                       └─────────────────┘
-                                │
-                       ┌─────────────────┐
-                       │      Redis      │
-                       │   (Caching)     │
-                       └─────────────────┘
-```
-
-### 아키텍처 구성요소
-
-#### 🤖 Android Frontend
-- **Kotlin**: 안드로이드 네이티브 앱 개발
-- **Android Studio**: 통합 개발 환경 (IDE)
-- **Material Design**: 구글 디자인 가이드라인 준수
-- **REST API**: Spring Boot 백엔드와 HTTP 통신
-
-#### ⚙️ Spring Boot Backend  
-- **Spring Framework**: 메인 비즈니스 로직 처리
-- **Spring Security**: 인증 및 권한 관리
-- **JPA/Hibernate**: 데이터베이스 ORM
-- **MySQL 연동**: 사용자 및 여행 데이터 관리
-
-#### 🧠 AI Recommendation Service
-- **FastAPI**: 고성능 추천 API 서비스
-- **ALS 알고리즘**: 협업 필터링 기반 개인화 추천
-- **Redis**: 추천 결과 캐싱으로 응답 속도 최적화
+<img src="/images/architecture.png">
 
 ## ✨ 주요 기능
 
@@ -87,13 +45,6 @@ TravelOnNa AI 추천시스템은 **협업 필터링(ALS Algorithm)**을 기반�
 - **자동화 스케줄링**: cron 기반 배치 작업 실행
 
 ## 🔧 기술 스택
-
-### Mobile Frontend
-- **Kotlin**: 안드로이드 네이티브 앱 개발 언어
-- **Android Studio**: 공식 통합 개발 환경
-- **Material Design**: UI/UX 디자인 시스템
-- **Retrofit**: HTTP 클라이언트 라이브러리
-- **Gson**: JSON 파싱 라이브러리
 
 ### Backend Framework
 - **FastAPI 0.104.1**: 고성능 비동기 웹 프레임워크
@@ -117,61 +68,7 @@ TravelOnNa AI 추천시스템은 **협업 필터링(ALS Algorithm)**을 기반�
 - **Jenkins**: CI/CD 파이프라인
 - **Ansible**: 자동화 배포
 
-## 📁 디렉토리 구조
-
-```
-TravelOnNa_AI/
-├── README.md                           # 이 파일
-├── recommendation-service/            # 추천 서비스 API
-│   ├── app/                          # FastAPI 애플리케이션
-│   │   ├── main.py                   # 메인 애플리케이션
-│   │   ├── api/                      # API 엔드포인트
-│   │   ├── services/                 # 비즈니스 로직
-│   │   ├── models/                   # 데이터 모델
-│   │   └── utils/                    # 유틸리티
-│   ├── config/                       # 설정 파일
-│   ├── models/                       # 학습된 ML 모델
-│   ├── Dockerfile                    # Docker 빌드 파일
-│   ├── docker-compose.yml           # 로컬 개발 환경
-│   ├── requirements.txt             # Python 의존성
-│   ├── run.py                       # 서비스 실행 스크립트
-│   └── batch_runner.py              # 배치 처리 스크립트
-```
-
-## 🚀 빠른 시작
-
-### 1. 로컬 개발 환경
-
-```bash
-# 저장소 클론
-git clone <repository-url>
-cd TravelOnNa_AI/recommendation-service
-
-# Python 의존성 설치
-pip install -r requirements.txt
-
-# 환경변수 설정
-export HOST=0.0.0.0
-export PORT=8000
-export LOG_LEVEL=info
-
-# 서비스 실행
-python run.py
-```
-
-### 2. Docker Compose 실행
-
-```bash
-cd TravelOnNa_AI/recommendation-service
-
-# 전체 스택 실행 (AI 서비스 + Redis)
-docker-compose up -d
-
-# 로그 확인
-docker-compose logs -f
-```
-
-### 3. 서비스 확인
+### 서비스 확인
 
 ```bash
 # 헬스체크
@@ -200,53 +97,10 @@ curl -X POST "http://localhost:8001/recommendations" \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": 123,
-    "region": "capital",
-    "limit": 10
+    "type": "log",
+    "limit": 50
   }'
 ```
-
-## 🔄 배포
-
-### Kubernetes 배포
-
-```bash
-# Ansible playbook으로 배포 (Jenkins에서 자동 실행)
-ansible-playbook -i /etc/ansible/hosts /opt/ansible/docker_build_ai.yml
-ansible-playbook -i /etc/ansible/hosts /opt/ansible/k8s_deploy_ai.yml
-
-# 배포 상태 확인
-kubectl rollout status deployment/travelonna-ai-recommendation-deploy
-kubectl get pods -l app=travelonna-ai-recommendation
-```
-
-## 📊 모니터링
-
-### 주요 메트릭
-- **응답 시간**: API 호출 시 응답 시간 측정
-- **처리량**: 초당 추천 요청 수 (RPS)
-- **모델 성능**: 추천 정확도 및 다양성 지표
-- **시스템 리소스**: CPU, 메모리, 네트워크 사용량
-
-### 로그 확인
-```bash
-# 서비스 로그
-kubectl logs -f deployment/travelonna-ai-recommendation-deploy
-
-# 배치 처리 로그  
-docker logs travelonna-recommendation
-```
-
-## 🤝 기여하기
-
-1. 이슈 등록 또는 기능 제안
-2. 브랜치 생성: `git checkout -b feature/새기능`
-3. 변경사항 커밋: `git commit -m '새기능 추가'`
-4. 브랜치 푸시: `git push origin feature/새기능`
-5. Pull Request 생성
-
-## 📝 라이센스
-
-이 프로젝트는 TravelOnNa 팀의 소유입니다.
 
 ## 👥 팀 정보
 
@@ -255,6 +109,3 @@ docker logs travelonna-recommendation
 - **Backend**: Spring Boot 기반 메인 서비스 개발
 - **Android**: Kotlin 기반 네이티브 모바일 앱 개발
 - **DevOps**: Jenkins/Ansible/Kubernetes 기반 배포 자동화
-
----
-> 🌟 **여행ON나**와 함께 더 나은 여행 경험을 만들어보세요! 
