@@ -1,8 +1,8 @@
-# <a href="#" target="_blank">여행ON나 (TravelOnNa)</a>: AI 기반 소셜 관광 플랫폼 AI Micro Service
+# [여행ON나 (TravelOnNa)](https://your-site.com) : AI 기반 소셜 관광 플랫폼 AI Microservice
 
 ![TravelOnNa Banner](TravelOnNa_AI/recommendation-service/images/여행ON나_로고.png)
 
-![Python](https://img.shields.io/badge/python-3776AB?style=for-the-badghe&logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/python-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 ![Machine Learning](https://img.shields.io/badge/ALS-6750A4?style=for-the-badge&logo=matrix&logoColor=white)
 ![Jenkins](https://img.shields.io/badge/Jenkins-D24939?style=for-the-badge&logo=jenkins&logoColor=white)
