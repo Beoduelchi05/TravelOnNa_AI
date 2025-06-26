@@ -1,4 +1,4 @@
-# <a href="#" target="_blank">여행ON나 (TravelOnNa)</a>: AI 기반 소셜 관광 플랫폼 AI Micro Service
+# <a href="#" target="_blank">여행ON나 (TravelOnNa)</a>: AI 기반 소셜 관광 플랫폼 AI
 
 ![TravelOnNa Banner](./recommendation-service/images/여행ON나_로고.png)
 
@@ -12,22 +12,22 @@
 
 **여행ON나 플랫폼의 AI 기반 개인화 추천 시스템**
 
-## 🎯 프로젝트 개요
+##  프로젝트 개요
 
 TravelOnNa AI 추천시스템은 **협업 필터링(ALS Algorithm)**을 기반으로 사용자의 여행 취향을 분석하여 개인화된 여행지를 추천하는 마이크로서비스입니다.
 
 ### 핵심 특징
-- 🤖 **ALS 기반 협업 필터링**: 사용자-아이템 상호작용 데이터 학습
-- 🗺️ **지역별 특화 모델**: 수도권/강원/영남/호남/제주 지역별 최적화
-- ⚡ **실시간 추천**: FastAPI 기반 고성능 API 서비스
-- 🔄 **자동 배치 처리**: 주기적 모델 업데이트 및 재학습
-- 🐳 **컨테이너 기반**: Docker/Kubernetes 배포 지원
+-  **ALS 기반 협업 필터링**: 사용자-아이템 상호작용 데이터 학습
+-  **지역별 특화 모델**: 수도권/강원/영남/호남/제주 지역별 최적화
+-  **실시간 추천**: FastAPI 기반 고성능 API 서비스
+-  **자동 배치 처리**: 주기적 모델 업데이트 및 재학습
+-  **컨테이너 기반**: Docker/Kubernetes 배포 지원
 
-## 🏗️ 시스템 아키텍처
+##  시스템 아키텍처
 
 <img src="./recommendation-service/images/architecture.png">
 
-## ✨ 주요 기능
+##  주요 기능
 
 ### 1. 개인화 추천
 - **협업 필터링**: ALS(Alternating Least Squares) 알고리즘 활용
@@ -44,7 +44,7 @@ TravelOnNa AI 추천시스템은 **협업 필터링(ALS Algorithm)**을 기반�
 - **성능 모니터링**: 추천 정확도 및 시스템 성능 추적
 - **자동화 스케줄링**: cron 기반 배치 작업 실행
 
-## 🔧 기술 스택
+##  기술 스택
 
 ### Backend Framework
 - **FastAPI 0.104.1**: 고성능 비동기 웹 프레임워크
@@ -78,7 +78,7 @@ curl http://localhost:8001/health
 open http://localhost:8001/docs
 ```
 
-## 📚 API 문서
+##  API 문서
 
 ### 주요 엔드포인트
 
@@ -102,7 +102,7 @@ curl -X POST "http://localhost:8001/recommendations" \
   }'
 ```
 
-## 👥 팀 정보
+##  팀 정보
 
 **TravelOnNa Development Team**
 - **AI/ML**: 추천 알고리즘 개발 및 최적화
